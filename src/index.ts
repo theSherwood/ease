@@ -4,8 +4,7 @@ import {
   createTask,
   deleteTask,
   updateTask,
-  Task,
-  TaskListState,
+  TaskList,
   populateTasks,
   sessionTasks,
   recurringTasks,
@@ -14,9 +13,10 @@ import {
   idxFromId,
   idxFromTask,
   taskFromId,
+  callback,
 } from './tasks';
-import { createState, $, $$, dom } from './tiny';
-import { TASK_SESSION, TASK_RECURRING, TaskStatus, TASK_COMPLETED } from './types';
+import { render, diff, h, dom, DNode } from './vdom';
+import { TASK_SESSION, TASK_RECURRING, TaskStatus, TASK_COMPLETED, Task } from './types';
 const { div, h1, button, p, input, span } = dom;
 
 const DEFAULT_TASK_TIME = 25 * 60;
@@ -91,43 +91,80 @@ function formatTime(time: number): string {
   return res;
 }
 
-function taskView(task: Task) {
-  const descriptionInput = input({
-    value: task.description,
-    oninput: (e) => {
-      updateTaskField(task, 'description', e.target.value);
-    },
-  }) as HTMLInputElement;
-  task.addUpdate('description', () => {
-    descriptionInput.value = task.description;
-  });
+enum DragState {
+  None,
+  Top,
+  Bottom,
+}
 
-  const timeEstimateInput = input({
-    value: formatTime(task.timeEstimate),
-    onblur: (e) => {
-      updateTimeEstimate(e);
-    },
-    onkeydown: (e) => {
-      if (e.key === 'Enter') {
-        updateTimeEstimate(e);
-      }
-    },
-  }) as HTMLInputElement;
-  task.addUpdate('timeEstimate', () => {
-    timeEstimateInput.value = formatTime(task.timeEstimate);
-  });
+function taskView(task: Task, { dragState = DragState.None, timeSignal = 0 }, update) {
   function updateTimeEstimate(e) {
     let time = parseHumanReadableTime(e.target.value);
+    update({ timeSignal: timeSignal + 1 });
     updateTaskField(task, 'timeEstimate', time);
-    timeEstimateInput.value = formatTime(time);
   }
+  const domId = `task-${task.id}`;
 
-  const buttonContainer = div();
-  const DndHandle = span(
+  let resolvedStyles = styles.task;
+  if (dragState === DragState.Bottom) resolvedStyles = { ...styles.task, ...styles.taskDropBottom };
+  if (dragState === DragState.Top) resolvedStyles = { ...styles.task, ...styles.taskDropTop };
+
+  return div(
     {
-      style: { cursor: 'grab', userSelect: 'none' },
-      ondrag: (e) => {
-        console.log('dragging');
+      id: domId,
+      className: 'task',
+      style: resolvedStyles,
+      draggable: true,
+      ondragover: (e) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        // console.log('drag over', e);
+        const taskDiv = document.getElementById(domId) as HTMLElement;
+        // find whether the mouse is closer to the top or bottom of the element
+        const rect = taskDiv.getBoundingClientRect();
+        const y = e.clientY - rect.top;
+        if (y > rect.height / 2) {
+          update({ dragState: DragState.Bottom });
+        } else {
+          update({ dragState: DragState.Top });
+        }
+      },
+      ondrop: async (e) => {
+        e.preventDefault();
+        try {
+          console.log('drop?', e.dataTransfer.getData('text/plain'), e);
+          const taskId = parseInt(e.dataTransfer.getData('text/plain'));
+          const taskDiv = document.getElementById(domId) as HTMLElement;
+          const rect = taskDiv.getBoundingClientRect();
+          const y = e.clientY - rect.top;
+          let { idx, list } = idxFromTask(task.id, task.status);
+          let newFridx = '';
+          if (y > rect.height / 2) {
+            console.log('drop bottom');
+            // drop below
+            let otherTask = list[idx + 1];
+            let nextTaskFridx = otherTask?.fridx || null;
+            newFridx = generateKeyBetween(task.fridx, nextTaskFridx);
+          } else {
+            console.log('drop top');
+            // drop above
+            let prevTask = list[idx - 1];
+            let prevTaskFridx = prevTask?.fridx || null;
+            newFridx = generateKeyBetween(prevTaskFridx, task.fridx);
+          }
+          console.log('new fridx', newFridx, taskId);
+          let droppedTask = await taskFromId(taskId);
+          await deleteTask(droppedTask!);
+          await createTask({ ...droppedTask!, status: task.status, fridx: newFridx });
+        } catch (e) {
+          console.error(e);
+        } finally {
+          update({ dragState: DragState.None });
+        }
+      },
+      ondragleave: (e) => {
+        e.preventDefault();
+        update({ dragState: DragState.None });
       },
       ondragstart: (e) => {
         console.log('drag start');
@@ -135,112 +172,60 @@ function taskView(task: Task) {
         e.dataTransfer.effectAllowed = 'move';
       },
     },
-    '🔲',
-  );
-  const taskDiv = div({
-    className: 'task',
-    style: styles.task,
-    draggable: true,
-    ondragover: (e) => {
-      e.preventDefault();
-      e.dataTransfer.dropEffect = 'move';
-      console.log('drag over', e);
-      // find whether the mouse is closer to the top or bottom of the element
-      const rect = taskDiv.getBoundingClientRect();
-      const y = e.clientY - rect.top;
-      if (y > rect.height / 2) {
-        Object.assign(taskDiv.style, styles.taskDropBottom);
-      } else {
-        Object.assign(taskDiv.style, styles.taskDropTop);
-      }
-    },
-    ondrop: async (e) => {
-      e.preventDefault();
-      try {
-        console.log('drop?', e.dataTransfer.getData('text/plain'), e);
-        const taskId = parseInt(e.dataTransfer.getData('text/plain'));
-        const rect = taskDiv.getBoundingClientRect();
-        const y = e.clientY - rect.top;
-        let { idx, list } = idxFromTask(task.id, task.status);
-        let newFridx = null;
-        if (y > rect.height / 2) {
-          console.log('drop bottom');
-          // drop below
-          let otherTask = list[idx + 1];
-          let nextTaskFridx = otherTask?.fridx || null;
-          newFridx = generateKeyBetween(task.fridx, nextTaskFridx);
-        } else {
-          console.log('drop top');
-          // drop above
-          let prevTask = list[idx - 1];
-          let prevTaskFridx = prevTask?.fridx || null;
-          newFridx = generateKeyBetween(prevTaskFridx, task.fridx);
-        }
-        console.log('new fridx', newFridx, taskId);
-        let droppedTask = await taskFromId(taskId);
-        updateTaskField(droppedTask!.task, 'fridx', newFridx);
-      } catch (e) {
-        console.error(e);
-      } finally {
-        Object.assign(taskDiv.style, styles.task);
-      }
-    },
-    ondragleave: (e) => {
-      e.preventDefault();
-      Object.assign(taskDiv.style, styles.task);
-    },
-  });
-  const update = () => {
-    taskDiv.innerHTML = '';
-    taskDiv.append(DndHandle);
-    taskDiv.append(descriptionInput);
-    taskDiv.append(timeEstimateInput);
-    taskDiv.append(buttonContainer);
-  };
-  update();
-
-  const deleteButton = button(
-    { style: styles.taskDeleteButton, onclick: () => deleteTask(task) },
-    'X',
-  );
-  const promoteButton = button(
-    {
-      onclick: () => {
-        let description = task.description;
-        if (!description) return;
-        const time = Date.now();
-        createTask({
-          id: 0,
-          description,
-          status: TASK_SESSION,
-          timeEstimate: task.timeEstimate,
-          timeRemaining: 0,
-          createdAt: time,
-          completedAt: 0,
-          fridx: '',
-        });
+    span(
+      {
+        style: { cursor: 'grab', userSelect: 'none' },
       },
-    },
-    'Queue',
+      '🔲',
+    ),
+    input({
+      value: task.description,
+      oninput: (e) => {
+        updateTaskField(task, 'description', e.target.value);
+      },
+    }),
+    input({
+      value: formatTime(task.timeEstimate),
+      onblur: (e) => {
+        updateTimeEstimate(e);
+      },
+      onkeydown: (e) => {
+        if (e.key === 'Enter') {
+          updateTimeEstimate(e);
+        }
+      },
+    }),
+    div(
+      {},
+      task.status === TASK_RECURRING &&
+        button(
+          {
+            onclick: () => {
+              let description = task.description;
+              if (!description) return;
+              const time = Date.now();
+              createTask({
+                id: 0,
+                description,
+                status: TASK_SESSION,
+                timeEstimate: task.timeEstimate,
+                timeRemaining: 0,
+                createdAt: time,
+                completedAt: 0,
+                fridx: '',
+              });
+            },
+          },
+          'Queue',
+        ),
+      task.status !== TASK_COMPLETED &&
+        button({ style: styles.taskDeleteButton, onclick: () => deleteTask(task) }, 'X'),
+    ),
   );
-  const updateButtons = () => {
-    buttonContainer.innerHTML = '';
-    if (task.status === TASK_RECURRING) buttonContainer.append(promoteButton);
-    if (task.status !== TASK_COMPLETED) buttonContainer.append(deleteButton);
-  };
-  updateButtons();
-  task.addUpdate('status', updateButtons);
-
-  return taskDiv;
 }
 
-function taskListView(tasks: TaskListState) {
-  const taskListDiv = div({ className: 'task-list' });
-  const update = () => {
-    taskListDiv.innerHTML = '';
-    tasks.list.forEach((t) => taskListDiv.append(taskView(t)));
-  };
-  tasks.addUpdate('list', update);
+function taskListView(tasks: TaskList) {
+  const taskListDiv = div({ className: 'task-list' }, ...tasks.list.map((t) => h(taskView, t)));
   return taskListDiv;
 }
 
@@ -269,41 +254,53 @@ function newTaskInput({ status }: { status: TaskStatus }) {
   });
 }
 
-function sessionTasksView() {
+function sessionTasksView({ sessionTasks }: { sessionTasks: TaskList }) {
   return div(
     { className: 'session-tasks' },
-    h1('Session Tasks'),
-    taskListView(sessionTasks),
-    newTaskInput({ status: TASK_SESSION }),
+    h1({}, 'Session Tasks'),
+    h(taskListView, sessionTasks),
+    h(newTaskInput, { status: TASK_SESSION }),
   );
 }
 
-function recurringTasksView() {
+function recurringTasksView({ recurringTasks }: { recurringTasks: TaskList }) {
   return div(
     { className: 'recurring-tasks' },
-    h1('Recurring Tasks'),
-    taskListView(recurringTasks),
-    newTaskInput({ status: TASK_RECURRING }),
+    h1({}, 'Recurring Tasks'),
+    h(taskListView, recurringTasks),
+    h(newTaskInput, { status: TASK_RECURRING }),
   );
 }
 
-function completedTasksView() {
+function completedTasksView({ completedTasks }: { completedTasks: TaskList }) {
   return div(
     { className: 'completed-tasks' },
-    h1('Completed Tasks'),
-
-    taskListView(completedTasks),
+    h1({}, 'Completed Tasks'),
+    h(taskListView, completedTasks),
   );
 }
 
-function ui() {
-  const tasksBar = div(
+const appState = {
+  sessionTasks,
+  recurringTasks,
+  completedTasks,
+};
+
+function ui(props: typeof appState) {
+  return div(
     { className: 'tasks-bar' },
-    sessionTasksView(),
-    recurringTasksView(),
-    completedTasksView(),
+    h(sessionTasksView, { key: 'session', ...props }),
+    h(recurringTasksView, { key: 'recurring', ...props }),
+    h(completedTasksView, { key: 'completed', ...props }),
   );
-  return tasksBar;
 }
 
-$('#app')?.append(ui());
+const root = document.getElementById('app') as DNode;
+render(ui(appState), root);
+
+function redraw() {
+  console.log('redraw');
+  diff(root._vnode!, root, root._vnode!);
+}
+
+callback.onChange = redraw;

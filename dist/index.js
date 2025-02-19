@@ -85,13 +85,13 @@ function incrementInteger(x, digits) {
     if (head === "z") {
       return null;
     }
-    const h = String.fromCharCode(head.charCodeAt(0) + 1);
-    if (h > "a") {
+    const h2 = String.fromCharCode(head.charCodeAt(0) + 1);
+    if (h2 > "a") {
       digs.push(digits[0]);
     } else {
       digs.pop();
     }
-    return h + digs.join("");
+    return h2 + digs.join("");
   } else {
     return head + digs.join("");
   }
@@ -116,13 +116,13 @@ function decrementInteger(x, digits) {
     if (head === "A") {
       return null;
     }
-    const h = String.fromCharCode(head.charCodeAt(0) - 1);
-    if (h < "Z") {
+    const h2 = String.fromCharCode(head.charCodeAt(0) - 1);
+    if (h2 < "Z") {
       digs.push(digits.slice(-1));
     } else {
       digs.pop();
     }
-    return h + digs.join("");
+    return h2 + digs.join("");
   } else {
     return head + digs.join("");
   }
@@ -324,160 +324,17 @@ async function setupStore() {
   if (id > maxId) maxId = id;
 }
 
-// src/tiny.ts
-var assignDeep = (elm, props) => {
-  Object.entries(props).forEach(([key, value]) => {
-    if (typeof value === "object" && value !== null) {
-      assignDeep(elm[key], value);
-    } else {
-      Object.assign(elm, { [key]: value });
-    }
-  });
-};
-var tags = [
-  "a",
-  "abbr",
-  "address",
-  "area",
-  "article",
-  "aside",
-  "audio",
-  "b",
-  "base",
-  "bdi",
-  "bdo",
-  "blockquote",
-  "body",
-  "br",
-  "button",
-  "canvas",
-  "caption",
-  "cite",
-  "code",
-  "col",
-  "colgroup",
-  "data",
-  "datalist",
-  "dd",
-  "del",
-  "details",
-  "dfn",
-  "dialog",
-  "div",
-  "dl",
-  "dt",
-  "em",
-  "embed",
-  "fieldset",
-  "figcaption",
-  "figure",
-  "footer",
-  "form",
-  "h1",
-  "h2",
-  "h3",
-  "h4",
-  "h5",
-  "h6",
-  "head",
-  "header",
-  "hr",
-  "html",
-  "i",
-  "iframe",
-  "img",
-  "input",
-  "ins",
-  "kbd",
-  "label",
-  "legend",
-  "li",
-  "link",
-  "main",
-  "map",
-  "mark",
-  "meta",
-  "meter",
-  "nav",
-  "noscript",
-  "object",
-  "ol",
-  "optgroup",
-  "option",
-  "output",
-  "p",
-  "param",
-  "picture",
-  "pre",
-  "progress",
-  "q",
-  "rp",
-  "rt",
-  "ruby",
-  "s",
-  "samp",
-  "script",
-  "section",
-  "select",
-  "small",
-  "source",
-  "span",
-  "strong",
-  "style",
-  "sub",
-  "summary",
-  "sup",
-  "table",
-  "tbody",
-  "td",
-  "template",
-  "textarea",
-  "tfoot",
-  "th",
-  "thead",
-  "time",
-  "title",
-  "tr",
-  "track",
-  "u",
-  "ul",
-  "var",
-  "video",
-  "wbr"
-];
-var dom = {};
-tags.forEach((tag) => {
-  dom[tag] = (...args) => {
-    const props = typeof args[0] === "object" && !(args[0] instanceof Node) ? args.shift() : {};
-    const elm = document.createElement(tag);
-    assignDeep(elm, props);
-    elm.append(...args.map((a) => typeof a === "string" ? document.createTextNode(a) : a));
-    return elm;
-  };
-});
-var $ = (selector) => document.querySelector(selector);
-function createState(state) {
-  const appState = {
-    ...state,
-    _updates: Object.fromEntries(Object.keys(state).map((s) => [s, []])),
-    _update: (s) => appState._updates[s].forEach((u) => u()),
-    addUpdate: (s, u) => appState._updates[s].push(u)
-  };
-  return new Proxy(appState, {
-    set(o, p2, v) {
-      o[p2] = v;
-      o._update(p2);
-      return true;
-    }
-  });
-}
-
 // src/types.ts
 var TASK_SESSION = 0;
 var TASK_RECURRING = 2;
 var TASK_COMPLETED = 3;
 
 // src/tasks.ts
+var callback = {
+  onChange: () => {
+    console.log("callback onChange");
+  }
+};
 var windowId = Math.random().toString(36);
 var channel = new BroadcastChannel("ease");
 function postTaskMessage(data) {
@@ -490,9 +347,10 @@ channel.addEventListener("message", async (e) => {
     removeTaskFromList(data.id, sessionTasks);
     removeTaskFromList(data.id, recurringTasks);
     removeTaskFromList(data.id, completedTasks);
+    callback.onChange();
   }
   if (data.type === "createTask") {
-    onCreateTask(data.id);
+    await onCreateTask(data.id);
   }
   if (data.type === "updateTask") {
   }
@@ -503,33 +361,17 @@ channel.addEventListener("message", async (e) => {
       if (prevStatus === TASK_RECURRING) removeTaskFromList(data.id, recurringTasks);
       if (prevStatus === TASK_COMPLETED) removeTaskFromList(data.id, completedTasks);
       await onCreateTask(data.id);
-    } else if (data.field === "fridx") {
-      console.log("fridx update", data);
-      let res = await taskFromId(data.id);
-      if (!res) return;
-      let { task, config } = res;
-      let tasks;
-      if (config.status === TASK_SESSION) tasks = sessionTasks;
-      if (config.status === TASK_RECURRING) tasks = recurringTasks;
-      if (config.status === TASK_COMPLETED) tasks = completedTasks;
-      tasks.list.sort((a, b) => a.fridx.localeCompare(b.fridx));
-      tasks.list = tasks.list;
     } else {
-      let res = await taskFromId(data.id);
-      if (!res) return;
-      let { task, config } = res;
-      task[data.field] = config[data.field];
+      let task = await taskFromId(data.id);
+      if (task) callback.onChange();
     }
   }
   if (data.type === "resetTasks") {
-    populateTasks();
+    await populateTasks();
   }
   if (data.type === "resetAudio") {
   }
 });
-function taskFromTaskConfig(config) {
-  return createState(config);
-}
 async function storeTask(config) {
   config.id = getId();
   if (!config.fridx) {
@@ -542,18 +384,18 @@ async function storeTask(config) {
     config.fridx = generateKeyBetween((lastTask == null ? void 0 : lastTask.fridx) || null, null);
   }
   await taskStore.add(config);
-  return taskFromTaskConfig(config);
+  return config;
 }
-var sessionTasks = createState({ list: [] });
-var recurringTasks = createState({ list: [] });
-var completedTasks = createState({ list: [] });
+var sessionTasks = { list: [] };
+var recurringTasks = { list: [] };
+var completedTasks = { list: [] };
 async function onCreateTask(id) {
-  const taskConfig = await taskStore.get(id);
-  if (taskConfig === null) return;
-  const task = taskFromTaskConfig(taskConfig);
-  if (taskConfig.status === TASK_SESSION) addTaskToList(task, sessionTasks);
-  if (taskConfig.status === TASK_RECURRING) addTaskToList(task, recurringTasks);
-  if (taskConfig.status === TASK_COMPLETED) addTaskToList(task, completedTasks);
+  const task = await taskStore.get(id);
+  if (task === null) return;
+  if (task.status === TASK_SESSION) addTaskToList(task, sessionTasks);
+  if (task.status === TASK_RECURRING) addTaskToList(task, recurringTasks);
+  if (task.status === TASK_COMPLETED) addTaskToList(task, completedTasks);
+  callback.onChange();
 }
 function idxFromTask(id, status) {
   let list = [];
@@ -563,16 +405,18 @@ function idxFromTask(id, status) {
   return { idx: list.findIndex((t) => t.id === id), list };
 }
 async function taskFromId(id) {
-  const taskConfig = await taskStore.get(id);
-  if (taskConfig === null) return;
-  let { idx, list } = idxFromTask(id, taskConfig.status);
-  if (idx === -1) return;
-  let task = list[idx];
-  return { task, config: taskConfig };
+  let storeTask2 = await taskStore.get(id);
+  if (!storeTask2) return null;
+  let task;
+  if ((storeTask2 == null ? void 0 : storeTask2.status) === TASK_SESSION) task = sessionTasks.list.find((t) => t.id === id);
+  if ((storeTask2 == null ? void 0 : storeTask2.status) === TASK_RECURRING) task = recurringTasks.list.find((t) => t.id === id);
+  if ((storeTask2 == null ? void 0 : storeTask2.status) === TASK_COMPLETED) task = completedTasks.list.find((t) => t.id === id);
+  Object.assign(task, storeTask2);
+  return task;
 }
 function addTaskToList(task, list) {
   list.list.push(task);
-  list.list.sort((a, b) => a.fridx.localeCompare(b.fridx));
+  list.list.sort((a, b) => a.fridx > b.fridx ? 1 : -1);
   list.list = list.list;
   console.log("added task", task, list.list);
 }
@@ -585,18 +429,19 @@ function removeTaskFromList(taskId, list) {
   if (found) list.list = newList;
 }
 async function populateTasks() {
-  for await (const taskConfig of taskStore.iterate()) {
-    const task = taskFromTaskConfig(taskConfig);
-    if (taskConfig.status === TASK_SESSION) addTaskToList(task, sessionTasks);
-    if (taskConfig.status === TASK_RECURRING) addTaskToList(task, recurringTasks);
-    if (taskConfig.status === TASK_COMPLETED) addTaskToList(task, completedTasks);
+  for await (const task of taskStore.iterate()) {
+    if (task.status === TASK_SESSION) addTaskToList(task, sessionTasks);
+    if (task.status === TASK_RECURRING) addTaskToList(task, recurringTasks);
+    if (task.status === TASK_COMPLETED) addTaskToList(task, completedTasks);
   }
+  callback.onChange();
 }
 async function createTask(taskConfig) {
   const task = await storeTask(taskConfig);
   if (taskConfig.status === TASK_SESSION) addTaskToList(task, sessionTasks);
   if (taskConfig.status === TASK_RECURRING) addTaskToList(task, recurringTasks);
   if (taskConfig.status === TASK_COMPLETED) addTaskToList(task, completedTasks);
+  callback.onChange();
   postTaskMessage({ type: "createTask", id: task.id });
 }
 async function deleteTask(task) {
@@ -604,23 +449,121 @@ async function deleteTask(task) {
   if (task.status === TASK_SESSION) removeTaskFromList(task.id, sessionTasks);
   if (task.status === TASK_RECURRING) removeTaskFromList(task.id, recurringTasks);
   if (task.status === TASK_COMPLETED) removeTaskFromList(task.id, completedTasks);
+  console.log("deleted task", task, sessionTasks.list);
+  callback.onChange();
   postTaskMessage({ type: "deleteTask", id: task.id });
 }
 async function updateTaskField(task, field, value) {
-  let newConfig = {
-    description: task.description,
-    status: task.status,
-    timeEstimate: task.timeEstimate,
-    timeRemaining: task.timeRemaining,
-    createdAt: task.createdAt,
-    completedAt: task.completedAt,
-    fridx: task.fridx,
-    id: task.id,
-    [field]: value
-  };
-  await taskStore.upsert(newConfig);
-  postTaskMessage({ type: "updateTaskField", id: task.id, field, prev: task[field] });
+  console.log("updateTaskField", task, field, value, task[field]);
+  const prev = task[field];
+  task[field] = value;
+  await taskStore.upsert(task);
+  postTaskMessage({ type: "updateTaskField", id: task.id, field, prev });
 }
+
+// src/vdom.ts
+function h(type, props, ...children) {
+  return {
+    _type: type,
+    _props: props,
+    // An object for components and DOM nodes, a string for text nodes.
+    _children: children.filter((_) => !!_),
+    // Filter out null and undefined children.
+    key: props && (props.key || props.id)
+  };
+}
+function Fragment(props) {
+  return props.children;
+}
+function render(newVNode, dom2, oldVNode = dom2._vnode || (dom2._vnode = {})) {
+  return diff(h(Fragment, {}, [newVNode]), dom2, oldVNode);
+}
+function diff(newVNode, dom2, oldVNode, currentChildIndex = -1) {
+  if (Array.isArray(newVNode)) {
+    return diffChildren(dom2, newVNode, oldVNode);
+  } else if (typeof newVNode._type === "function") {
+    newVNode._state = oldVNode._state || {};
+    const props = { children: newVNode._children, ...newVNode._props };
+    const renderResult = newVNode._type(
+      props,
+      newVNode._state,
+      // Updater function that is passed as 3rd argument to components
+      (nextState) => {
+        Object.assign(newVNode._state, nextState);
+        return diff(newVNode, dom2, newVNode);
+      }
+    );
+    newVNode._patched = diff(
+      renderResult,
+      dom2,
+      oldVNode && oldVNode._patched || {},
+      currentChildIndex
+    );
+    return dom2._vnode = newVNode;
+  } else {
+    const newDom = oldVNode.dom || (newVNode._type ? document.createElement(newVNode._type) : (
+      // If we have a text node, vnode.props will be a string
+      new Text(newVNode._props)
+    ));
+    if (newVNode._props != oldVNode._props) {
+      if (newVNode._type) {
+        const { key, ref, ...newProps } = newVNode._props;
+        if (ref) ref.current = newDom;
+        for (let name in newProps) {
+          const value = newProps[name];
+          if (name === "style" && !value.trim) {
+            for (const n in value) {
+              newDom.style[n] = value[n];
+            }
+          } else if (value != (oldVNode._props && oldVNode._props[name])) {
+            if (name in newDom || (name = name.toLowerCase()) in newDom) {
+              newDom[name] = value;
+            } else if (value != null) {
+              console.log(name, value, newVNode._props);
+              newDom.setAttribute(name, value);
+            } else {
+              newDom.removeAttribute(name);
+            }
+          }
+        }
+      } else {
+        newDom.data = newVNode._props;
+      }
+    }
+    diffChildren(newDom, newVNode._children, oldVNode);
+    if (!oldVNode.dom || currentChildIndex > -1) {
+      dom2.insertBefore(newVNode.dom = newDom, dom2.childNodes[currentChildIndex + 1] || null);
+    }
+    return dom2._vnode = Object.assign(oldVNode, newVNode);
+  }
+}
+function diffChildren(parentDom, newChildren, oldVNode) {
+  const oldChildren = oldVNode._normalizedChildren || [];
+  oldVNode._normalizedChildren = newChildren.concat.apply([], newChildren).map((child, index) => {
+    const nextNewChild = child._children ? child : h("", "" + child);
+    const nextOldChild = oldChildren.find((oldChild, childIndex) => {
+      let result = oldChild && oldChild._type == nextNewChild._type && oldChild.key == nextNewChild.key && (childIndex == index && (index = void 0), oldChildren[childIndex] = 0, oldChild);
+      return result;
+    }) || {};
+    return diff(nextNewChild, parentDom, nextOldChild, index);
+  });
+  oldChildren.forEach(removePatchedChildren);
+  return oldVNode;
+}
+function removePatchedChildren(child) {
+  const { _children = [], _patched } = child;
+  if (child.dom) {
+    child.dom.remove();
+  } else {
+    _children.forEach((c) => c && removePatchedChildren(c));
+    _patched && removePatchedChildren(_patched);
+  }
+}
+var tags = ["div", "h1", "button", "p", "input", "span"];
+var dom = tags.reduce((acc, tag) => {
+  acc[tag] = (props, ...children) => h(tag, props, ...children);
+  return acc;
+}, {});
 
 // src/index.ts
 var { div, h1, button, p, input, span } = dom;
@@ -685,41 +628,68 @@ function formatTime(time) {
   if (res === "") res = "0m";
   return res;
 }
-function taskView(task) {
-  const descriptionInput = input({
-    value: task.description,
-    oninput: (e) => {
-      updateTaskField(task, "description", e.target.value);
-    }
-  });
-  task.addUpdate("description", () => {
-    descriptionInput.value = task.description;
-  });
-  const timeEstimateInput = input({
-    value: formatTime(task.timeEstimate),
-    onblur: (e) => {
-      updateTimeEstimate(e);
-    },
-    onkeydown: (e) => {
-      if (e.key === "Enter") {
-        updateTimeEstimate(e);
-      }
-    }
-  });
-  task.addUpdate("timeEstimate", () => {
-    timeEstimateInput.value = formatTime(task.timeEstimate);
-  });
+function taskView(task, { dragState = 0 /* None */, timeSignal = 0 }, update) {
   function updateTimeEstimate(e) {
     let time = parseHumanReadableTime(e.target.value);
+    update({ timeSignal: timeSignal + 1 });
     updateTaskField(task, "timeEstimate", time);
-    timeEstimateInput.value = formatTime(time);
   }
-  const buttonContainer = div();
-  const DndHandle = span(
+  const domId = `task-${task.id}`;
+  let resolvedStyles = styles.task;
+  if (dragState === 2 /* Bottom */) resolvedStyles = { ...styles.task, ...styles.taskDropBottom };
+  if (dragState === 1 /* Top */) resolvedStyles = { ...styles.task, ...styles.taskDropTop };
+  return div(
     {
-      style: { cursor: "grab", userSelect: "none" },
-      ondrag: (e) => {
-        console.log("dragging");
+      id: domId,
+      className: "task",
+      style: resolvedStyles,
+      draggable: true,
+      ondragover: (e) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "move";
+        const taskDiv = document.getElementById(domId);
+        const rect = taskDiv.getBoundingClientRect();
+        const y = e.clientY - rect.top;
+        if (y > rect.height / 2) {
+          update({ dragState: 2 /* Bottom */ });
+        } else {
+          update({ dragState: 1 /* Top */ });
+        }
+      },
+      ondrop: async (e) => {
+        e.preventDefault();
+        try {
+          console.log("drop?", e.dataTransfer.getData("text/plain"), e);
+          const taskId = parseInt(e.dataTransfer.getData("text/plain"));
+          const taskDiv = document.getElementById(domId);
+          const rect = taskDiv.getBoundingClientRect();
+          const y = e.clientY - rect.top;
+          let { idx, list } = idxFromTask(task.id, task.status);
+          let newFridx = "";
+          if (y > rect.height / 2) {
+            console.log("drop bottom");
+            let otherTask = list[idx + 1];
+            let nextTaskFridx = (otherTask == null ? void 0 : otherTask.fridx) || null;
+            newFridx = generateKeyBetween(task.fridx, nextTaskFridx);
+          } else {
+            console.log("drop top");
+            let prevTask = list[idx - 1];
+            let prevTaskFridx = (prevTask == null ? void 0 : prevTask.fridx) || null;
+            newFridx = generateKeyBetween(prevTaskFridx, task.fridx);
+          }
+          console.log("new fridx", newFridx, taskId);
+          let droppedTask = await taskFromId(taskId);
+          await deleteTask(droppedTask);
+          await createTask({ ...droppedTask, status: task.status, fridx: newFridx });
+        } catch (e2) {
+          console.error(e2);
+        } finally {
+          update({ dragState: 0 /* None */ });
+        }
+      },
+      ondragleave: (e) => {
+        e.preventDefault();
+        update({ dragState: 0 /* None */ });
       },
       ondragstart: (e) => {
         console.log("drag start");
@@ -727,106 +697,57 @@ function taskView(task) {
         e.dataTransfer.effectAllowed = "move";
       }
     },
-    "\u{1F532}"
-  );
-  const taskDiv = div({
-    className: "task",
-    style: styles.task,
-    draggable: true,
-    ondragover: (e) => {
-      e.preventDefault();
-      e.dataTransfer.dropEffect = "move";
-      console.log("drag over", e);
-      const rect = taskDiv.getBoundingClientRect();
-      const y = e.clientY - rect.top;
-      if (y > rect.height / 2) {
-        Object.assign(taskDiv.style, styles.taskDropBottom);
-      } else {
-        Object.assign(taskDiv.style, styles.taskDropTop);
+    span(
+      {
+        style: { cursor: "grab", userSelect: "none" }
+      },
+      "\u{1F532}"
+    ),
+    input({
+      value: task.description,
+      oninput: (e) => {
+        updateTaskField(task, "description", e.target.value);
       }
-    },
-    ondrop: async (e) => {
-      e.preventDefault();
-      try {
-        console.log("drop?", e.dataTransfer.getData("text/plain"), e);
-        const taskId = parseInt(e.dataTransfer.getData("text/plain"));
-        const rect = taskDiv.getBoundingClientRect();
-        const y = e.clientY - rect.top;
-        let { idx, list } = idxFromTask(task.id, task.status);
-        let newFridx = null;
-        if (y > rect.height / 2) {
-          console.log("drop bottom");
-          let otherTask = list[idx + 1];
-          let nextTaskFridx = (otherTask == null ? void 0 : otherTask.fridx) || null;
-          newFridx = generateKeyBetween(task.fridx, nextTaskFridx);
-        } else {
-          console.log("drop top");
-          let prevTask = list[idx - 1];
-          let prevTaskFridx = (prevTask == null ? void 0 : prevTask.fridx) || null;
-          newFridx = generateKeyBetween(prevTaskFridx, task.fridx);
+    }),
+    input({
+      value: formatTime(task.timeEstimate),
+      onblur: (e) => {
+        updateTimeEstimate(e);
+      },
+      onkeydown: (e) => {
+        if (e.key === "Enter") {
+          updateTimeEstimate(e);
         }
-        console.log("new fridx", newFridx, taskId);
-        let droppedTask = await taskFromId(taskId);
-        updateTaskField(droppedTask.task, "fridx", newFridx);
-      } catch (e2) {
-        console.error(e2);
-      } finally {
-        Object.assign(taskDiv.style, styles.task);
       }
-    },
-    ondragleave: (e) => {
-      e.preventDefault();
-      Object.assign(taskDiv.style, styles.task);
-    }
-  });
-  const update = () => {
-    taskDiv.innerHTML = "";
-    taskDiv.append(DndHandle);
-    taskDiv.append(descriptionInput);
-    taskDiv.append(timeEstimateInput);
-    taskDiv.append(buttonContainer);
-  };
-  update();
-  const deleteButton = button(
-    { style: styles.taskDeleteButton, onclick: () => deleteTask(task) },
-    "X"
+    }),
+    div(
+      {},
+      task.status === TASK_RECURRING && button(
+        {
+          onclick: () => {
+            let description = task.description;
+            if (!description) return;
+            const time = Date.now();
+            createTask({
+              id: 0,
+              description,
+              status: TASK_SESSION,
+              timeEstimate: task.timeEstimate,
+              timeRemaining: 0,
+              createdAt: time,
+              completedAt: 0,
+              fridx: ""
+            });
+          }
+        },
+        "Queue"
+      ),
+      task.status !== TASK_COMPLETED && button({ style: styles.taskDeleteButton, onclick: () => deleteTask(task) }, "X")
+    )
   );
-  const promoteButton = button(
-    {
-      onclick: () => {
-        let description = task.description;
-        if (!description) return;
-        const time = Date.now();
-        createTask({
-          id: 0,
-          description,
-          status: TASK_SESSION,
-          timeEstimate: task.timeEstimate,
-          timeRemaining: 0,
-          createdAt: time,
-          completedAt: 0,
-          fridx: ""
-        });
-      }
-    },
-    "Queue"
-  );
-  const updateButtons = () => {
-    buttonContainer.innerHTML = "";
-    if (task.status === TASK_RECURRING) buttonContainer.append(promoteButton);
-    if (task.status !== TASK_COMPLETED) buttonContainer.append(deleteButton);
-  };
-  updateButtons();
-  task.addUpdate("status", updateButtons);
-  return taskDiv;
 }
 function taskListView(tasks) {
-  const taskListDiv = div({ className: "task-list" });
-  const update = () => {
-    taskListDiv.innerHTML = "";
-    tasks.list.forEach((t) => taskListDiv.append(taskView(t)));
-  };
-  tasks.addUpdate("list", update);
+  const taskListDiv = div({ className: "task-list" }, ...tasks.list.map((t) => h(taskView, t)));
   return taskListDiv;
 }
 function newTaskInput({ status }) {
@@ -853,38 +774,47 @@ function newTaskInput({ status }) {
     }
   });
 }
-function sessionTasksView() {
+function sessionTasksView({ sessionTasks: sessionTasks2 }) {
   return div(
     { className: "session-tasks" },
-    h1("Session Tasks"),
-    taskListView(sessionTasks),
-    newTaskInput({ status: TASK_SESSION })
+    h1({}, "Session Tasks"),
+    h(taskListView, sessionTasks2),
+    h(newTaskInput, { status: TASK_SESSION })
   );
 }
-function recurringTasksView() {
+function recurringTasksView({ recurringTasks: recurringTasks2 }) {
   return div(
     { className: "recurring-tasks" },
-    h1("Recurring Tasks"),
-    taskListView(recurringTasks),
-    newTaskInput({ status: TASK_RECURRING })
+    h1({}, "Recurring Tasks"),
+    h(taskListView, recurringTasks2),
+    h(newTaskInput, { status: TASK_RECURRING })
   );
 }
-function completedTasksView() {
+function completedTasksView({ completedTasks: completedTasks2 }) {
   return div(
     { className: "completed-tasks" },
-    h1("Completed Tasks"),
-    taskListView(completedTasks)
+    h1({}, "Completed Tasks"),
+    h(taskListView, completedTasks2)
   );
 }
-function ui() {
-  const tasksBar = div(
+var appState = {
+  sessionTasks,
+  recurringTasks,
+  completedTasks
+};
+function ui(props) {
+  return div(
     { className: "tasks-bar" },
-    sessionTasksView(),
-    recurringTasksView(),
-    completedTasksView()
+    h(sessionTasksView, { key: "session", ...props }),
+    h(recurringTasksView, { key: "recurring", ...props }),
+    h(completedTasksView, { key: "completed", ...props })
   );
-  return tasksBar;
 }
-var _a;
-(_a = $("#app")) == null ? void 0 : _a.append(ui());
+var root = document.getElementById("app");
+render(ui(appState), root);
+function redraw() {
+  console.log("redraw");
+  diff(root._vnode, root, root._vnode);
+}
+callback.onChange = redraw;
 //# sourceMappingURL=index.js.map

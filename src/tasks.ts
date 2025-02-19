@@ -1,7 +1,12 @@
 import { generateKeyBetween } from './fridx';
 import { ListStore, EASE_STORE, getId, taskStore, audioStore } from './storage';
-import { createState, $, $$, dom } from './tiny';
-import { TASK_COMPLETED, TASK_SESSION, TASK_RECURRING, TaskConfig, TaskStatus } from './types';
+import { TASK_COMPLETED, TASK_SESSION, TASK_RECURRING, Task, TaskStatus } from './types';
+
+export const callback = {
+  onChange: () => {
+    console.log('callback onChange');
+  },
+};
 
 const windowId = Math.random().toString(36);
 const channel = new BroadcastChannel('ease');
@@ -15,7 +20,7 @@ type MessageTypes =
 type Message = {
   type: MessageTypes;
   id: number;
-  field?: keyof TaskConfig;
+  field?: keyof Task;
   prev?: any;
 };
 
@@ -37,9 +42,10 @@ channel.addEventListener('message', async (e) => {
     removeTaskFromList(data.id, sessionTasks);
     removeTaskFromList(data.id, recurringTasks);
     removeTaskFromList(data.id, completedTasks);
+    callback.onChange();
   }
   if (data.type === 'createTask') {
-    onCreateTask(data.id);
+    await onCreateTask(data.id);
   }
   if (data.type === 'updateTask') {
     //
@@ -51,40 +57,22 @@ channel.addEventListener('message', async (e) => {
       if (prevStatus === TASK_RECURRING) removeTaskFromList(data.id, recurringTasks);
       if (prevStatus === TASK_COMPLETED) removeTaskFromList(data.id, completedTasks);
       await onCreateTask(data.id);
-    } else if (data.field === 'fridx') {
-      console.log('fridx update', data);
-      let res = await taskFromId(data.id);
-      if (!res) return;
-      let { task, config } = res;
-      let tasks: TaskListState;
-      if (config.status === TASK_SESSION) tasks = sessionTasks;
-      if (config.status === TASK_RECURRING) tasks = recurringTasks;
-      if (config.status === TASK_COMPLETED) tasks = completedTasks;
-      tasks!.list.sort((a, b) => a.fridx.localeCompare(b.fridx));
-      tasks!.list = tasks!.list;
     } else {
-      let res = await taskFromId(data.id);
-      if (!res) return;
-      let { task, config } = res;
-      task[data.field! as string] = config[data.field!];
+      let task = await taskFromId(data.id);
+      if (task) callback.onChange();
     }
   }
   if (data.type === 'resetTasks') {
-    populateTasks();
+    await populateTasks();
   }
   if (data.type === 'resetAudio') {
     // TODO
   }
 });
 
-export type Task = ReturnType<typeof taskFromTaskConfig>;
 export type TaskList = { list: Task[] };
-export type TaskListState = ReturnType<typeof createState<TaskList>>;
 
-function taskFromTaskConfig(config: TaskConfig) {
-  return createState(config);
-}
-async function storeTask(config: TaskConfig) {
+async function storeTask(config: Task) {
   config.id = getId();
   if (!config.fridx) {
     let lastTask;
@@ -96,20 +84,20 @@ async function storeTask(config: TaskConfig) {
     config.fridx = generateKeyBetween(lastTask?.fridx || null, null);
   }
   await taskStore.add(config);
-  return taskFromTaskConfig(config);
+  return config;
 }
 
-export const sessionTasks = createState<TaskList>({ list: [] });
-export const recurringTasks = createState<TaskList>({ list: [] });
-export const completedTasks = createState<TaskList>({ list: [] });
+export const sessionTasks: TaskList = { list: [] };
+export const recurringTasks: TaskList = { list: [] };
+export const completedTasks: TaskList = { list: [] };
 
 async function onCreateTask(id: number) {
-  const taskConfig = await taskStore.get(id);
-  if (taskConfig === null) return;
-  const task = taskFromTaskConfig(taskConfig);
-  if (taskConfig.status === TASK_SESSION) addTaskToList(task, sessionTasks);
-  if (taskConfig.status === TASK_RECURRING) addTaskToList(task, recurringTasks);
-  if (taskConfig.status === TASK_COMPLETED) addTaskToList(task, completedTasks);
+  const task = await taskStore.get(id);
+  if (task === null) return;
+  if (task.status === TASK_SESSION) addTaskToList(task, sessionTasks);
+  if (task.status === TASK_RECURRING) addTaskToList(task, recurringTasks);
+  if (task.status === TASK_COMPLETED) addTaskToList(task, completedTasks);
+  callback.onChange();
 }
 
 export function idxFromTask(id: number, status: TaskStatus) {
@@ -126,25 +114,26 @@ export async function idxFromId(id: number) {
   return idxFromTask(id, taskConfig.status);
 }
 
-export async function taskFromId(
-  id: number,
-): Promise<{ task: Task; config: TaskConfig } | undefined> {
-  const taskConfig = await taskStore.get(id);
-  if (taskConfig === null) return;
-  let { idx, list } = idxFromTask(id, taskConfig.status);
-  if (idx === -1) return;
-  let task = list[idx];
-  return { task, config: taskConfig };
+export async function taskFromId(id: number): Promise<Task | null> {
+  let storeTask = await taskStore.get(id);
+  if (!storeTask) return null;
+  let task: Task | undefined;
+  if (storeTask?.status === TASK_SESSION) task = sessionTasks.list.find((t) => t.id === id);
+  if (storeTask?.status === TASK_RECURRING) task = recurringTasks.list.find((t) => t.id === id);
+  if (storeTask?.status === TASK_COMPLETED) task = completedTasks.list.find((t) => t.id === id);
+  Object.assign(task!, storeTask);
+  return task!;
 }
 
-function addTaskToList(task: Task, list: TaskListState) {
+function addTaskToList(task: Task, list: TaskList) {
   list.list.push(task);
-  list.list.sort((a, b) => a.fridx.localeCompare(b.fridx));
+  // list.list.sort((a, b) => a.fridx.localeCompare(b.fridx));
+  list.list.sort((a, b) => (a.fridx > b.fridx ? 1 : -1));
   list.list = list.list;
   console.log('added task', task, list.list);
 }
 
-function removeTaskFromList(taskId: number, list: TaskListState) {
+function removeTaskFromList(taskId: number, list: TaskList) {
   let found = false;
   const newList = list.list.filter((t) => {
     if (t.id !== taskId) return true;
@@ -154,19 +143,20 @@ function removeTaskFromList(taskId: number, list: TaskListState) {
 }
 
 export async function populateTasks() {
-  for await (const taskConfig of taskStore.iterate()) {
-    const task = taskFromTaskConfig(taskConfig);
-    if (taskConfig.status === TASK_SESSION) addTaskToList(task, sessionTasks);
-    if (taskConfig.status === TASK_RECURRING) addTaskToList(task, recurringTasks);
-    if (taskConfig.status === TASK_COMPLETED) addTaskToList(task, completedTasks);
+  for await (const task of taskStore.iterate()) {
+    if (task.status === TASK_SESSION) addTaskToList(task, sessionTasks);
+    if (task.status === TASK_RECURRING) addTaskToList(task, recurringTasks);
+    if (task.status === TASK_COMPLETED) addTaskToList(task, completedTasks);
   }
+  callback.onChange();
 }
 
-export async function createTask(taskConfig: TaskConfig) {
+export async function createTask(taskConfig: Task) {
   const task = await storeTask(taskConfig);
   if (taskConfig.status === TASK_SESSION) addTaskToList(task, sessionTasks);
   if (taskConfig.status === TASK_RECURRING) addTaskToList(task, recurringTasks);
   if (taskConfig.status === TASK_COMPLETED) addTaskToList(task, completedTasks);
+  callback.onChange();
   postTaskMessage({ type: 'createTask', id: task.id });
 }
 
@@ -175,11 +165,13 @@ export async function deleteTask(task: Task) {
   if (task.status === TASK_SESSION) removeTaskFromList(task.id, sessionTasks);
   if (task.status === TASK_RECURRING) removeTaskFromList(task.id, recurringTasks);
   if (task.status === TASK_COMPLETED) removeTaskFromList(task.id, completedTasks);
+  console.log('deleted task', task, sessionTasks.list);
+  callback.onChange();
   postTaskMessage({ type: 'deleteTask', id: task.id });
 }
 
-export async function updateTask(task: Task, update: Partial<TaskConfig>) {
-  let newConfig: TaskConfig = {
+export async function updateTask(task: Task, update: Partial<Task>) {
+  let newConfig: Task = {
     description: task.description,
     status: task.status,
     timeEstimate: task.timeEstimate,
@@ -191,21 +183,15 @@ export async function updateTask(task: Task, update: Partial<TaskConfig>) {
     id: task.id,
   };
   await taskStore.upsert(newConfig);
+  callback.onChange();
   postTaskMessage({ type: 'updateTask', id: task.id });
 }
 
-export async function updateTaskField(task: Task, field: keyof TaskConfig, value: any) {
-  let newConfig: TaskConfig = {
-    description: task.description,
-    status: task.status,
-    timeEstimate: task.timeEstimate,
-    timeRemaining: task.timeRemaining,
-    createdAt: task.createdAt,
-    completedAt: task.completedAt,
-    fridx: task.fridx,
-    id: task.id,
-    [field]: value,
-  };
-  await taskStore.upsert(newConfig);
-  postTaskMessage({ type: 'updateTaskField', id: task.id, field, prev: task[field] });
+export async function updateTaskField(task: Task, field: keyof Task, value: any) {
+  console.log('updateTaskField', task, field, value, task[field]);
+  const prev = task[field];
+  // @ts-ignore
+  task[field] = value;
+  await taskStore.upsert(task);
+  postTaskMessage({ type: 'updateTaskField', id: task.id, field, prev });
 }

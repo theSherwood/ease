@@ -9,7 +9,7 @@ export type TaskStatus =
   | typeof TASK_RECURRING
   | typeof TASK_COMPLETED;
 
-export type TaskConfig = {
+export type Task = {
   id: number;
   description: string;
   status: TaskStatus;

@@ -1,4 +1,4 @@
-import { TaskConfig } from './types';
+import { Task } from './types';
 
 export const EASE_STORE = 'ease_store';
 
@@ -229,8 +229,8 @@ export class ListStore<T extends HasId> {
   }
 }
 
-export const taskStore = new ListStore<TaskConfig>(EASE_STORE, 'tasks');
-export const audioStore = new ListStore<TaskConfig>(EASE_STORE, 'audio');
+export const taskStore = new ListStore<Task>(EASE_STORE, 'tasks');
+export const audioStore = new ListStore<Task>(EASE_STORE, 'audio');
 
 export async function setupStore() {
   await taskStore.connect();
