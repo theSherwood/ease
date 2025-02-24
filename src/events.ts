@@ -1,6 +1,17 @@
 import { generateKeyBetween } from './fridx';
+import { appState, completedTasks, recurringTasks, sessionTasks } from './state';
 import { ListStore, EASE_STORE, getId, taskStore, audioStore } from './storage';
-import { TASK_COMPLETED, TASK_SESSION, TASK_RECURRING, Task, TaskStatus } from './types';
+import {
+  TASK_COMPLETED,
+  TASK_SESSION,
+  TASK_RECURRING,
+  Task,
+  TaskList,
+  TaskStatus,
+  APP_ACTIVE,
+  APP_PAUSED,
+  APP_IDLE,
+} from './types';
 
 export const callback = {
   onChange: () => {
@@ -11,23 +22,18 @@ export const callback = {
 const windowId = Math.random().toString(36);
 const channel = new BroadcastChannel('ease');
 type MessageTypes =
-  | 'createTask'
-  | 'deleteTask'
   | 'updateTask'
   | 'resetTasks'
   | 'resetAudio'
-  | 'updateTaskField';
+  | 'startSession'
+  | 'pauseSession'
+  | 'endSession';
 type Message = {
   type: MessageTypes;
   id: number;
   field?: keyof Task;
   prev?: any;
 };
-
-let maxMessageId = 0;
-function getMessageId() {
-  return ++maxMessageId;
-}
 
 // Map of pending messages and their resolvers so that the sender can await a response
 function postTaskMessage(data: Message) {
@@ -38,29 +44,26 @@ function postTaskMessage(data: Message) {
 channel.addEventListener('message', async (e) => {
   let data: Message = e.data.data;
   console.log('received message', data);
-  if (data.type === 'deleteTask') {
-    removeTaskFromList(data.id, sessionTasks);
-    removeTaskFromList(data.id, recurringTasks);
-    removeTaskFromList(data.id, completedTasks);
+  if (data.type === 'startSession') {
+    localStorage.setItem('appStatus', APP_ACTIVE.toString());
+    appState.status = APP_ACTIVE;
     callback.onChange();
   }
-  if (data.type === 'createTask') {
-    await onCreateTask(data.id);
+  if (data.type === 'pauseSession') {
+    localStorage.setItem('appStatus', APP_PAUSED.toString());
+    appState.status = APP_PAUSED;
+    callback.onChange();
+  }
+  if (data.type === 'endSession') {
+    localStorage.setItem('appStatus', APP_IDLE.toString());
+    appState.status = APP_IDLE;
+    callback.onChange();
   }
   if (data.type === 'updateTask') {
-    //
-  }
-  if (data.type === 'updateTaskField') {
-    if (data.field === 'status') {
-      let prevStatus = data.prev;
-      if (prevStatus === TASK_SESSION) removeTaskFromList(data.id, sessionTasks);
-      if (prevStatus === TASK_RECURRING) removeTaskFromList(data.id, recurringTasks);
-      if (prevStatus === TASK_COMPLETED) removeTaskFromList(data.id, completedTasks);
-      await onCreateTask(data.id);
-    } else {
-      let task = await taskFromId(data.id);
-      if (task) callback.onChange();
-    }
+    removeTaskFromLists(data.id);
+    const task = await taskStore.get(data.id);
+    if (task !== null) addTaskToLists(task);
+    callback.onChange();
   }
   if (data.type === 'resetTasks') {
     await populateTasks();
@@ -70,7 +73,15 @@ channel.addEventListener('message', async (e) => {
   }
 });
 
-export type TaskList = { list: Task[] };
+export function startSession() {
+  postTaskMessage({ type: 'startSession', id: 0 });
+}
+export function pauseSession() {
+  postTaskMessage({ type: 'pauseSession', id: 0 });
+}
+export function endSession() {
+  postTaskMessage({ type: 'endSession', id: 0 });
+}
 
 async function storeTask(config: Task) {
   config.id = getId();
@@ -87,17 +98,22 @@ async function storeTask(config: Task) {
   return config;
 }
 
-export const sessionTasks: TaskList = { list: [] };
-export const recurringTasks: TaskList = { list: [] };
-export const completedTasks: TaskList = { list: [] };
+function removeTaskFromLists(task: number | Task) {
+  if (typeof task === 'number') {
+    removeTaskFromList(task, sessionTasks);
+    removeTaskFromList(task, recurringTasks);
+    removeTaskFromList(task, completedTasks);
+  } else {
+    if (task.status === TASK_SESSION) removeTaskFromList(task.id, sessionTasks);
+    if (task.status === TASK_RECURRING) removeTaskFromList(task.id, recurringTasks);
+    if (task.status === TASK_COMPLETED) removeTaskFromList(task.id, completedTasks);
+  }
+}
 
-async function onCreateTask(id: number) {
-  const task = await taskStore.get(id);
-  if (task === null) return;
+function addTaskToLists(task: Task) {
   if (task.status === TASK_SESSION) addTaskToList(task, sessionTasks);
   if (task.status === TASK_RECURRING) addTaskToList(task, recurringTasks);
   if (task.status === TASK_COMPLETED) addTaskToList(task, completedTasks);
-  callback.onChange();
 }
 
 export function idxFromTask(id: number, status: TaskStatus) {
@@ -127,7 +143,6 @@ export async function taskFromId(id: number): Promise<Task | null> {
 
 function addTaskToList(task: Task, list: TaskList) {
   list.list.push(task);
-  // list.list.sort((a, b) => a.fridx.localeCompare(b.fridx));
   list.list.sort((a, b) => (a.fridx > b.fridx ? 1 : -1));
   list.list = list.list;
   console.log('added task', task, list.list);
@@ -144,54 +159,30 @@ function removeTaskFromList(taskId: number, list: TaskList) {
 
 export async function populateTasks() {
   for await (const task of taskStore.iterate()) {
-    if (task.status === TASK_SESSION) addTaskToList(task, sessionTasks);
-    if (task.status === TASK_RECURRING) addTaskToList(task, recurringTasks);
-    if (task.status === TASK_COMPLETED) addTaskToList(task, completedTasks);
+    addTaskToLists(task);
   }
   callback.onChange();
 }
 
 export async function createTask(taskConfig: Task) {
   const task = await storeTask(taskConfig);
-  if (taskConfig.status === TASK_SESSION) addTaskToList(task, sessionTasks);
-  if (taskConfig.status === TASK_RECURRING) addTaskToList(task, recurringTasks);
-  if (taskConfig.status === TASK_COMPLETED) addTaskToList(task, completedTasks);
-  callback.onChange();
-  postTaskMessage({ type: 'createTask', id: task.id });
-}
-
-export async function deleteTask(task: Task) {
-  await taskStore.delete(task.id);
-  if (task.status === TASK_SESSION) removeTaskFromList(task.id, sessionTasks);
-  if (task.status === TASK_RECURRING) removeTaskFromList(task.id, recurringTasks);
-  if (task.status === TASK_COMPLETED) removeTaskFromList(task.id, completedTasks);
-  console.log('deleted task', task, sessionTasks.list);
-  callback.onChange();
-  postTaskMessage({ type: 'deleteTask', id: task.id });
-}
-
-export async function updateTask(task: Task, update: Partial<Task>) {
-  let newConfig: Task = {
-    description: task.description,
-    status: task.status,
-    timeEstimate: task.timeEstimate,
-    timeRemaining: task.timeRemaining,
-    createdAt: task.createdAt,
-    completedAt: task.completedAt,
-    fridx: task.fridx,
-    ...update,
-    id: task.id,
-  };
-  await taskStore.upsert(newConfig);
+  addTaskToLists(task);
   callback.onChange();
   postTaskMessage({ type: 'updateTask', id: task.id });
 }
 
-export async function updateTaskField(task: Task, field: keyof Task, value: any) {
-  console.log('updateTaskField', task, field, value, task[field]);
-  const prev = task[field];
-  // @ts-ignore
-  task[field] = value;
-  await taskStore.upsert(task);
-  postTaskMessage({ type: 'updateTaskField', id: task.id, field, prev });
+export async function deleteTask(task: Task) {
+  await taskStore.delete(task.id);
+  removeTaskFromLists(task);
+  callback.onChange();
+  postTaskMessage({ type: 'updateTask', id: task.id });
+}
+
+export async function updateTask(task: Task, update: Partial<Task>) {
+  removeTaskFromLists(task);
+  const updatedTask = { ...task, ...update };
+  await taskStore.upsert(updatedTask);
+  addTaskToLists(updatedTask);
+  callback.onChange();
+  postTaskMessage({ type: 'updateTask', id: task.id });
 }

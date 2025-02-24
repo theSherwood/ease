@@ -324,12 +324,26 @@ async function setupStore() {
   if (id > maxId) maxId = id;
 }
 
+// src/state.ts
+var sessionTasks = { list: [] };
+var recurringTasks = { list: [] };
+var completedTasks = { list: [] };
+var appState = {
+  status: Number(localStorage.getItem("appStatus")),
+  sessionTasks,
+  recurringTasks,
+  completedTasks
+};
+
 // src/types.ts
 var TASK_SESSION = 0;
 var TASK_RECURRING = 2;
 var TASK_COMPLETED = 3;
+var APP_IDLE = 0;
+var APP_ACTIVE = 1;
+var APP_PAUSED = 2;
 
-// src/tasks.ts
+// src/events.ts
 var callback = {
   onChange: () => {
     console.log("callback onChange");
@@ -343,28 +357,26 @@ function postTaskMessage(data) {
 channel.addEventListener("message", async (e) => {
   let data = e.data.data;
   console.log("received message", data);
-  if (data.type === "deleteTask") {
-    removeTaskFromList(data.id, sessionTasks);
-    removeTaskFromList(data.id, recurringTasks);
-    removeTaskFromList(data.id, completedTasks);
+  if (data.type === "startSession") {
+    localStorage.setItem("appStatus", APP_ACTIVE.toString());
+    appState.status = APP_ACTIVE;
     callback.onChange();
   }
-  if (data.type === "createTask") {
-    await onCreateTask(data.id);
+  if (data.type === "pauseSession") {
+    localStorage.setItem("appStatus", APP_PAUSED.toString());
+    appState.status = APP_PAUSED;
+    callback.onChange();
+  }
+  if (data.type === "endSession") {
+    localStorage.setItem("appStatus", APP_IDLE.toString());
+    appState.status = APP_IDLE;
+    callback.onChange();
   }
   if (data.type === "updateTask") {
-  }
-  if (data.type === "updateTaskField") {
-    if (data.field === "status") {
-      let prevStatus = data.prev;
-      if (prevStatus === TASK_SESSION) removeTaskFromList(data.id, sessionTasks);
-      if (prevStatus === TASK_RECURRING) removeTaskFromList(data.id, recurringTasks);
-      if (prevStatus === TASK_COMPLETED) removeTaskFromList(data.id, completedTasks);
-      await onCreateTask(data.id);
-    } else {
-      let task = await taskFromId(data.id);
-      if (task) callback.onChange();
-    }
+    removeTaskFromLists(data.id);
+    const task = await taskStore.get(data.id);
+    if (task !== null) addTaskToLists(task);
+    callback.onChange();
   }
   if (data.type === "resetTasks") {
     await populateTasks();
@@ -372,6 +384,12 @@ channel.addEventListener("message", async (e) => {
   if (data.type === "resetAudio") {
   }
 });
+function startSession() {
+  postTaskMessage({ type: "startSession", id: 0 });
+}
+function endSession() {
+  postTaskMessage({ type: "endSession", id: 0 });
+}
 async function storeTask(config) {
   config.id = getId();
   if (!config.fridx) {
@@ -386,16 +404,21 @@ async function storeTask(config) {
   await taskStore.add(config);
   return config;
 }
-var sessionTasks = { list: [] };
-var recurringTasks = { list: [] };
-var completedTasks = { list: [] };
-async function onCreateTask(id) {
-  const task = await taskStore.get(id);
-  if (task === null) return;
+function removeTaskFromLists(task) {
+  if (typeof task === "number") {
+    removeTaskFromList(task, sessionTasks);
+    removeTaskFromList(task, recurringTasks);
+    removeTaskFromList(task, completedTasks);
+  } else {
+    if (task.status === TASK_SESSION) removeTaskFromList(task.id, sessionTasks);
+    if (task.status === TASK_RECURRING) removeTaskFromList(task.id, recurringTasks);
+    if (task.status === TASK_COMPLETED) removeTaskFromList(task.id, completedTasks);
+  }
+}
+function addTaskToLists(task) {
   if (task.status === TASK_SESSION) addTaskToList(task, sessionTasks);
   if (task.status === TASK_RECURRING) addTaskToList(task, recurringTasks);
   if (task.status === TASK_COMPLETED) addTaskToList(task, completedTasks);
-  callback.onChange();
 }
 function idxFromTask(id, status) {
   let list = [];
@@ -430,35 +453,29 @@ function removeTaskFromList(taskId, list) {
 }
 async function populateTasks() {
   for await (const task of taskStore.iterate()) {
-    if (task.status === TASK_SESSION) addTaskToList(task, sessionTasks);
-    if (task.status === TASK_RECURRING) addTaskToList(task, recurringTasks);
-    if (task.status === TASK_COMPLETED) addTaskToList(task, completedTasks);
+    addTaskToLists(task);
   }
   callback.onChange();
 }
 async function createTask(taskConfig) {
   const task = await storeTask(taskConfig);
-  if (taskConfig.status === TASK_SESSION) addTaskToList(task, sessionTasks);
-  if (taskConfig.status === TASK_RECURRING) addTaskToList(task, recurringTasks);
-  if (taskConfig.status === TASK_COMPLETED) addTaskToList(task, completedTasks);
+  addTaskToLists(task);
   callback.onChange();
-  postTaskMessage({ type: "createTask", id: task.id });
+  postTaskMessage({ type: "updateTask", id: task.id });
 }
 async function deleteTask(task) {
   await taskStore.delete(task.id);
-  if (task.status === TASK_SESSION) removeTaskFromList(task.id, sessionTasks);
-  if (task.status === TASK_RECURRING) removeTaskFromList(task.id, recurringTasks);
-  if (task.status === TASK_COMPLETED) removeTaskFromList(task.id, completedTasks);
-  console.log("deleted task", task, sessionTasks.list);
+  removeTaskFromLists(task);
   callback.onChange();
-  postTaskMessage({ type: "deleteTask", id: task.id });
+  postTaskMessage({ type: "updateTask", id: task.id });
 }
-async function updateTaskField(task, field, value) {
-  console.log("updateTaskField", task, field, value, task[field]);
-  const prev = task[field];
-  task[field] = value;
-  await taskStore.upsert(task);
-  postTaskMessage({ type: "updateTaskField", id: task.id, field, prev });
+async function updateTask(task, update) {
+  removeTaskFromLists(task);
+  const updatedTask = { ...task, ...update };
+  await taskStore.upsert(updatedTask);
+  addTaskToLists(updatedTask);
+  callback.onChange();
+  postTaskMessage({ type: "updateTask", id: task.id });
 }
 
 // src/vdom.ts
@@ -631,8 +648,7 @@ function formatTime(time) {
 function taskView(task, { dragState = 0 /* None */, timeSignal = 0 }, update) {
   function updateTimeEstimate(e) {
     let time = parseHumanReadableTime(e.target.value);
-    update({ timeSignal: timeSignal + 1 });
-    updateTaskField(task, "timeEstimate", time);
+    updateTask(task, { timeEstimate: time });
   }
   const domId = `task-${task.id}`;
   let resolvedStyles = styles.task;
@@ -679,8 +695,7 @@ function taskView(task, { dragState = 0 /* None */, timeSignal = 0 }, update) {
           }
           console.log("new fridx", newFridx, taskId);
           let droppedTask = await taskFromId(taskId);
-          await deleteTask(droppedTask);
-          await createTask({ ...droppedTask, status: task.status, fridx: newFridx });
+          await updateTask(droppedTask, { fridx: newFridx, status: task.status });
         } catch (e2) {
           console.error(e2);
         } finally {
@@ -706,7 +721,7 @@ function taskView(task, { dragState = 0 /* None */, timeSignal = 0 }, update) {
     input({
       value: task.description,
       oninput: (e) => {
-        updateTaskField(task, "description", e.target.value);
+        updateTask(task, { description: e.target.value });
       }
     }),
     input({
@@ -745,6 +760,12 @@ function taskView(task, { dragState = 0 /* None */, timeSignal = 0 }, update) {
       task.status !== TASK_COMPLETED && button({ style: styles.taskDeleteButton, onclick: () => deleteTask(task) }, "X")
     )
   );
+}
+function activeTaskView({ activeTask }) {
+  if (!activeTask) {
+    return div({ className: "active-task" }, h1({}, "No Active Task"));
+  }
+  return div({ className: "active-task" }, h1({}, "Active Task"), h(taskView, activeTask));
 }
 function taskListView(tasks) {
   const taskListDiv = div({ className: "task-list" }, ...tasks.list.map((t) => h(taskView, t)));
@@ -797,24 +818,60 @@ function completedTasksView({ completedTasks: completedTasks2 }) {
     h(taskListView, completedTasks2)
   );
 }
-var appState = {
-  sessionTasks,
-  recurringTasks,
-  completedTasks
-};
-function ui(props) {
-  return div(
-    { className: "tasks-bar" },
-    h(sessionTasksView, { key: "session", ...props }),
-    h(recurringTasksView, { key: "recurring", ...props }),
-    h(completedTasksView, { key: "completed", ...props })
+function startSessionButton() {
+  return button(
+    {
+      onclick: () => {
+        console.log("start session");
+        appState.status = APP_ACTIVE;
+        startSession();
+        redraw();
+      }
+    },
+    "Start Session"
   );
 }
+function endSessionButton() {
+  return button(
+    {
+      onclick: () => {
+        console.log("end session");
+        appState.status = APP_IDLE;
+        endSession();
+        redraw();
+      }
+    },
+    "End Session"
+  );
+}
+function ui(props) {
+  if (props.status === APP_IDLE || props.sessionTasks.list.length === 0) {
+    return div(
+      { className: "tasks-bar" },
+      h(startSessionButton, props),
+      h(sessionTasksView, { key: "session", ...props }),
+      h(recurringTasksView, { key: "recurring", ...props }),
+      h(completedTasksView, { key: "completed", ...props })
+    );
+  } else {
+    return div(
+      { className: "tasks-bar" },
+      h(activeTaskView, { key: "active", activeTask: props.sessionTasks.list[0] }),
+      h(endSessionButton, props),
+      h(sessionTasksView, {
+        key: "session",
+        ...props,
+        sessionTasks: { list: props.sessionTasks.list.slice(1) }
+      }),
+      h(recurringTasksView, { key: "recurring", ...props }),
+      h(completedTasksView, { key: "completed", ...props })
+    );
+  }
+}
 var root = document.getElementById("app");
-render(ui(appState), root);
+render(h(ui, appState), root);
 function redraw() {
-  console.log("redraw");
-  diff(root._vnode, root, root._vnode);
+  diff(h(ui, appState), root, root._vnode);
 }
 callback.onChange = redraw;
 //# sourceMappingURL=index.js.map

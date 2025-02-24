@@ -4,19 +4,26 @@ import {
   createTask,
   deleteTask,
   updateTask,
-  TaskList,
   populateTasks,
-  sessionTasks,
-  recurringTasks,
-  completedTasks,
-  updateTaskField,
-  idxFromId,
   idxFromTask,
   taskFromId,
   callback,
-} from './tasks';
+  startSession,
+  endSession,
+} from './events';
 import { render, diff, h, dom, DNode } from './vdom';
-import { TASK_SESSION, TASK_RECURRING, TaskStatus, TASK_COMPLETED, Task } from './types';
+import {
+  TASK_SESSION,
+  TASK_RECURRING,
+  TaskStatus,
+  TASK_COMPLETED,
+  Task,
+  TaskList,
+  AppState,
+  APP_IDLE,
+  APP_ACTIVE,
+} from './types';
+import { appState } from './state';
 const { div, h1, button, p, input, span } = dom;
 
 const DEFAULT_TASK_TIME = 25 * 60;
@@ -100,8 +107,7 @@ enum DragState {
 function taskView(task: Task, { dragState = DragState.None, timeSignal = 0 }, update) {
   function updateTimeEstimate(e) {
     let time = parseHumanReadableTime(e.target.value);
-    update({ timeSignal: timeSignal + 1 });
-    updateTaskField(task, 'timeEstimate', time);
+    updateTask(task, { timeEstimate: time });
   }
   const domId = `task-${task.id}`;
 
@@ -154,8 +160,7 @@ function taskView(task: Task, { dragState = DragState.None, timeSignal = 0 }, up
           }
           console.log('new fridx', newFridx, taskId);
           let droppedTask = await taskFromId(taskId);
-          await deleteTask(droppedTask!);
-          await createTask({ ...droppedTask!, status: task.status, fridx: newFridx });
+          await updateTask(droppedTask!, { fridx: newFridx, status: task.status });
         } catch (e) {
           console.error(e);
         } finally {
@@ -181,7 +186,7 @@ function taskView(task: Task, { dragState = DragState.None, timeSignal = 0 }, up
     input({
       value: task.description,
       oninput: (e) => {
-        updateTaskField(task, 'description', e.target.value);
+        updateTask(task, { description: e.target.value });
       },
     }),
     input({
@@ -224,6 +229,13 @@ function taskView(task: Task, { dragState = DragState.None, timeSignal = 0 }, up
   );
 }
 
+function activeTaskView({ activeTask }: { activeTask: Task | null }) {
+  if (!activeTask) {
+    return div({ className: 'active-task' }, h1({}, 'No Active Task'));
+  }
+  return div({ className: 'active-task' }, h1({}, 'Active Task'), h(taskView, activeTask));
+}
+
 function taskListView(tasks: TaskList) {
   const taskListDiv = div({ className: 'task-list' }, ...tasks.list.map((t) => h(taskView, t)));
   return taskListDiv;
@@ -254,7 +266,7 @@ function newTaskInput({ status }: { status: TaskStatus }) {
   });
 }
 
-function sessionTasksView({ sessionTasks }: { sessionTasks: TaskList }) {
+function sessionTasksView({ sessionTasks }: AppState) {
   return div(
     { className: 'session-tasks' },
     h1({}, 'Session Tasks'),
@@ -263,7 +275,7 @@ function sessionTasksView({ sessionTasks }: { sessionTasks: TaskList }) {
   );
 }
 
-function recurringTasksView({ recurringTasks }: { recurringTasks: TaskList }) {
+function recurringTasksView({ recurringTasks }: AppState) {
   return div(
     { className: 'recurring-tasks' },
     h1({}, 'Recurring Tasks'),
@@ -272,7 +284,7 @@ function recurringTasksView({ recurringTasks }: { recurringTasks: TaskList }) {
   );
 }
 
-function completedTasksView({ completedTasks }: { completedTasks: TaskList }) {
+function completedTasksView({ completedTasks }: AppState) {
   return div(
     { className: 'completed-tasks' },
     h1({}, 'Completed Tasks'),
@@ -280,27 +292,64 @@ function completedTasksView({ completedTasks }: { completedTasks: TaskList }) {
   );
 }
 
-const appState = {
-  sessionTasks,
-  recurringTasks,
-  completedTasks,
-};
-
-function ui(props: typeof appState) {
-  return div(
-    { className: 'tasks-bar' },
-    h(sessionTasksView, { key: 'session', ...props }),
-    h(recurringTasksView, { key: 'recurring', ...props }),
-    h(completedTasksView, { key: 'completed', ...props }),
+function startSessionButton() {
+  return button(
+    {
+      onclick: () => {
+        console.log('start session');
+        appState.status = APP_ACTIVE;
+        startSession();
+        redraw();
+      },
+    },
+    'Start Session',
   );
 }
 
+function endSessionButton() {
+  return button(
+    {
+      onclick: () => {
+        console.log('end session');
+        appState.status = APP_IDLE;
+        endSession();
+        redraw();
+      },
+    },
+    'End Session',
+  );
+}
+
+function ui(props: AppState) {
+  if (props.status === APP_IDLE || props.sessionTasks.list.length === 0) {
+    return div(
+      { className: 'tasks-bar' },
+      h(startSessionButton, props),
+      h(sessionTasksView, { key: 'session', ...props }),
+      h(recurringTasksView, { key: 'recurring', ...props }),
+      h(completedTasksView, { key: 'completed', ...props }),
+    );
+  } else {
+    return div(
+      { className: 'tasks-bar' },
+      h(activeTaskView, { key: 'active', activeTask: props.sessionTasks.list[0] }),
+      h(endSessionButton, props),
+      h(sessionTasksView, {
+        key: 'session',
+        ...props,
+        sessionTasks: { list: props.sessionTasks.list.slice(1) },
+      }),
+      h(recurringTasksView, { key: 'recurring', ...props }),
+      h(completedTasksView, { key: 'completed', ...props }),
+    );
+  }
+}
+
 const root = document.getElementById('app') as DNode;
-render(ui(appState), root);
+render(h(ui, appState), root);
 
 function redraw() {
-  console.log('redraw');
-  diff(root._vnode!, root, root._vnode!);
+  diff(h(ui, appState), root, root._vnode!);
 }
 
 callback.onChange = redraw;

@@ -19,3 +19,18 @@ export type Task = {
   completedAt: number;
   fridx: string;
 };
+
+export type TaskList = { list: Task[] };
+
+export const APP_IDLE = 0;
+export const APP_ACTIVE = 1;
+export const APP_PAUSED = 2;
+
+export type AppStatus = typeof APP_ACTIVE | typeof APP_PAUSED | typeof APP_IDLE;
+
+export type AppState = {
+  status: AppStatus;
+  sessionTasks: TaskList;
+  recurringTasks: TaskList;
+  completedTasks: TaskList;
+};
