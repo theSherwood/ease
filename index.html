@@ -4,7 +4,60 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Ease</title>
-    <style></style>
+    <style>
+      :root {
+        --bg: #faf6f1;
+        --bg-task: #fff8ef;
+        --bg-danger: #ff9178;
+        --accent: #e67550;
+        --text: #2c2420;
+        --text-muted: #8a817c;
+        --border: #d4ccc7;
+      }
+
+      body {
+        background-color: var(--bg);
+        color: var(--text);
+        font-family: 'JetBrains Mono', 'Fira Code', monospace;
+        margin: 0;
+        padding: 2rem;
+      }
+
+      input {
+        font-family: inherit;
+        font-size: 1rem;
+        padding: 0.5rem;
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        background: transparent;
+        color: var(--text);
+      }
+
+      button {
+        font-family: inherit;
+        font-size: 0.9rem;
+        padding: 0.5rem 1rem;
+        background-color: var(--accent);
+        color: white;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        transition: opacity 0.2s ease;
+      }
+
+      button:hover {
+        opacity: 0.9;
+      }
+
+      .task-list {
+        max-width: 800px;
+      }
+
+      h1 {
+        color: var(--text);
+        font-size: 1.5rem;
+      }
+    </style>
   </head>
   <body>
     <div id="app"></div>

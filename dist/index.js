@@ -600,28 +600,51 @@ setupStore().then(() => {
 var commonTaskStyles = {
   display: "flex",
   justifyContent: "space-between",
-  padding: "0.5rem"
+  alignItems: "center",
+  padding: "0 1rem",
+  gap: "1rem",
+  backgroundColor: "var(--bg-task)"
 };
 var styles = {
   task: {
     ...commonTaskStyles,
-    borderTop: "1px solid #ccc",
-    borderBottom: "1px solid #ccc"
+    borderTop: "2px solid transparent",
+    borderBottom: "2px solid transparent",
+    transition: "all 0.2s ease"
   },
   taskDropTop: {
     ...commonTaskStyles,
-    borderTop: "1px solid #f00",
-    borderBottom: "1px solid #ccc"
+    borderTop: "2px solid var(--accent)"
   },
   taskDropBottom: {
     ...commonTaskStyles,
-    borderTop: "1px solid #ccc",
-    borderBottom: "1px solid #f00"
+    borderBottom: "2px solid var(--accent)"
   },
   taskDeleteButton: {
-    marginLeft: "1rem"
+    padding: "0.5rem 1rem",
+    backgroundColor: "var(--bg-danger)",
+    color: "var(--text)",
+    border: "none",
+    borderRadius: "4px",
+    cursor: "pointer"
   },
-  taskDragHandle: { cursor: "grab", userSelect: "none" }
+  taskDragHandle: {
+    cursor: "grab",
+    userSelect: "none",
+    color: "var(--text-muted)"
+  },
+  collapseButton: {
+    display: "flex",
+    alignItems: "center",
+    backgroundColor: "transparent",
+    border: "none",
+    color: "var(--text-muted)",
+    cursor: "pointer",
+    padding: "0",
+    fontSize: "1.2rem",
+    marginRight: "0.5rem"
+  },
+  sectionHeader: {}
 };
 function parseHumanReadableTime(hrTime) {
   try {
@@ -655,7 +678,31 @@ function formatTime(time) {
   if (res === "") res = "0m";
   return res;
 }
-function taskView(task, { dragState = 0 /* None */, timeSignal = 0 }, update) {
+function sectionHeader({ title, collapsed, oncollapse, onexpand }) {
+  return div(
+    {},
+    button(
+      {
+        style: styles.collapseButton,
+        onclick: () => {
+          if (collapsed) {
+            onexpand();
+          } else {
+            oncollapse();
+          }
+        },
+        onkeydown: (e) => {
+          console.log("key", e.key);
+          if (e.key === "ArrowLeft") oncollapse();
+          if (e.key === "ArrowRight") onexpand();
+        }
+      },
+      // collapsed ? '▸' : '▾',
+      h1({ style: styles.sectionHeader }, title)
+    )
+  );
+}
+function taskView(task, { dragState = 0 /* None */ }, update) {
   function updateTimeEstimate(e) {
     let time = parseHumanReadableTime(e.target.value);
     updateTask(task, { timeEstimate: time });
@@ -800,27 +847,40 @@ function newTaskInput({ status }) {
     }
   });
 }
-function sessionTasksView({ sessionTasks: sessionTasks2 }) {
+function sessionTasksView({ sessionTasks: sessionTasks2 }, { collapsed = false }, update) {
   return div(
     { className: "session-tasks" },
-    h1({}, "Session Tasks"),
-    h(taskListView, sessionTasks2),
-    h(newTaskInput, { status: TASK_SESSION })
+    sectionHeader({
+      title: "Session Tasks",
+      collapsed,
+      oncollapse: () => update({ collapsed: true }),
+      onexpand: () => update({ collapsed: false })
+    }),
+    collapsed ? null : [h(taskListView, sessionTasks2), h(newTaskInput, { status: TASK_SESSION })]
   );
 }
-function recurringTasksView({ recurringTasks: recurringTasks2 }) {
+function recurringTasksView({ recurringTasks: recurringTasks2 }, { collapsed = false }, update) {
   return div(
     { className: "recurring-tasks" },
-    h1({}, "Recurring Tasks"),
-    h(taskListView, recurringTasks2),
-    h(newTaskInput, { status: TASK_RECURRING })
+    sectionHeader({
+      title: "Recurring Tasks",
+      collapsed,
+      oncollapse: () => update({ collapsed: true }),
+      onexpand: () => update({ collapsed: false })
+    }),
+    collapsed ? null : [h(taskListView, recurringTasks2), h(newTaskInput, { status: TASK_RECURRING })]
   );
 }
-function completedTasksView({ completedTasks: completedTasks2 }) {
+function completedTasksView({ completedTasks: completedTasks2 }, { collapsed = true }, update) {
   return div(
     { className: "completed-tasks" },
-    h1({}, "Completed Tasks"),
-    h(taskListView, completedTasks2)
+    sectionHeader({
+      title: "Completed Tasks",
+      collapsed,
+      oncollapse: () => update({ collapsed: true }),
+      onexpand: () => update({ collapsed: false })
+    }),
+    collapsed ? null : h(taskListView, completedTasks2)
   );
 }
 function sessionButton({ onclick, label }) {
