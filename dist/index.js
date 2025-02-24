@@ -385,9 +385,18 @@ channel.addEventListener("message", async (e) => {
   }
 });
 function startSession() {
+  appState.status = APP_ACTIVE;
+  callback.onChange();
   postTaskMessage({ type: "startSession", id: 0 });
 }
+function pauseSession() {
+  appState.status = APP_PAUSED;
+  callback.onChange();
+  postTaskMessage({ type: "pauseSession", id: 0 });
+}
 function endSession() {
+  appState.status = APP_IDLE;
+  callback.onChange();
   postTaskMessage({ type: "endSession", id: 0 });
 }
 async function storeTask(config) {
@@ -611,7 +620,8 @@ var styles = {
   },
   taskDeleteButton: {
     marginLeft: "1rem"
-  }
+  },
+  taskDragHandle: { cursor: "grab", userSelect: "none" }
 };
 function parseHumanReadableTime(hrTime) {
   try {
@@ -712,12 +722,7 @@ function taskView(task, { dragState = 0 /* None */, timeSignal = 0 }, update) {
         e.dataTransfer.effectAllowed = "move";
       }
     },
-    span(
-      {
-        style: { cursor: "grab", userSelect: "none" }
-      },
-      "\u{1F532}"
-    ),
+    span({ style: styles.taskDragHandle }, "\u283F"),
     input({
       value: task.description,
       oninput: (e) => {
@@ -818,37 +823,14 @@ function completedTasksView({ completedTasks: completedTasks2 }) {
     h(taskListView, completedTasks2)
   );
 }
-function startSessionButton() {
-  return button(
-    {
-      onclick: () => {
-        console.log("start session");
-        appState.status = APP_ACTIVE;
-        startSession();
-        redraw();
-      }
-    },
-    "Start Session"
-  );
-}
-function endSessionButton() {
-  return button(
-    {
-      onclick: () => {
-        console.log("end session");
-        appState.status = APP_IDLE;
-        endSession();
-        redraw();
-      }
-    },
-    "End Session"
-  );
+function sessionButton({ onclick, label }) {
+  return button({ onclick }, label);
 }
 function ui(props) {
   if (props.status === APP_IDLE || props.sessionTasks.list.length === 0) {
     return div(
       { className: "tasks-bar" },
-      h(startSessionButton, props),
+      h(sessionButton, { onclick: startSession, label: "Start Session" }),
       h(sessionTasksView, { key: "session", ...props }),
       h(recurringTasksView, { key: "recurring", ...props }),
       h(completedTasksView, { key: "completed", ...props })
@@ -856,8 +838,9 @@ function ui(props) {
   } else {
     return div(
       { className: "tasks-bar" },
+      props.status === APP_ACTIVE ? h(sessionButton, { onclick: pauseSession, label: "Pause Session" }) : h(sessionButton, { onclick: startSession, label: "Resume Session" }),
+      h(sessionButton, { onclick: endSession, label: "End Session" }),
       h(activeTaskView, { key: "active", activeTask: props.sessionTasks.list[0] }),
-      h(endSessionButton, props),
       h(sessionTasksView, {
         key: "session",
         ...props,

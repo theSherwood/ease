@@ -74,12 +74,18 @@ channel.addEventListener('message', async (e) => {
 });
 
 export function startSession() {
+  appState.status = APP_ACTIVE;
+  callback.onChange();
   postTaskMessage({ type: 'startSession', id: 0 });
 }
 export function pauseSession() {
+  appState.status = APP_PAUSED;
+  callback.onChange();
   postTaskMessage({ type: 'pauseSession', id: 0 });
 }
 export function endSession() {
+  appState.status = APP_IDLE;
+  callback.onChange();
   postTaskMessage({ type: 'endSession', id: 0 });
 }
 
