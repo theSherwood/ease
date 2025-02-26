@@ -1,5 +1,12 @@
 import { generateKeyBetween } from './fridx';
-import { appState, completedTasks, recurringTasks, sessionTasks } from './state';
+import {
+  appState,
+  completedTasks,
+  readFromLocalStorage,
+  recurringTasks,
+  sessionTasks,
+  writeToLocalStorage,
+} from './state';
 import { ListStore, EASE_STORE, getId, taskStore, audioStore } from './storage';
 import {
   TASK_COMPLETED,
@@ -11,6 +18,7 @@ import {
   APP_ACTIVE,
   APP_PAUSED,
   APP_IDLE,
+  AppStatus,
 } from './types';
 
 export const callback = {
@@ -19,44 +27,43 @@ export const callback = {
   },
 };
 
-const windowId = Math.random().toString(36);
 const channel = new BroadcastChannel('ease');
 type MessageTypes =
+  | 'rollcallInit'
+  | 'rollcallRespond'
   | 'updateTask'
   | 'resetTasks'
   | 'resetAudio'
-  | 'startSession'
-  | 'pauseSession'
-  | 'endSession';
-type Message = {
+  | 'sessionChange';
+type MessageData = {
   type: MessageTypes;
   id: number;
-  field?: keyof Task;
-  prev?: any;
+};
+type Message = {
+  data: MessageData;
+  tabId: string;
 };
 
 // Map of pending messages and their resolvers so that the sender can await a response
-function postTaskMessage(data: Message) {
-  channel.postMessage({ data, windowId });
+function postMessage(data: MessageData) {
+  channel.postMessage({ data, tabId: appState.tabId });
 }
 
 // All tabs update state from the storage on message
 channel.addEventListener('message', async (e) => {
-  let data: Message = e.data.data;
+  let { data, tabId }: Message = e.data;
   console.log('received message', data);
-  if (data.type === 'startSession') {
-    localStorage.setItem('appStatus', APP_ACTIVE.toString());
-    appState.status = APP_ACTIVE;
+  if (data.type === 'rollcallInit') {
+    appState.tabs = [appState.tabId, tabId];
+    postMessage({ type: 'rollcallRespond', id: 0 });
     callback.onChange();
   }
-  if (data.type === 'pauseSession') {
-    localStorage.setItem('appStatus', APP_PAUSED.toString());
-    appState.status = APP_PAUSED;
+  if (data.type === 'rollcallRespond') {
+    appState.tabs.push(tabId.toString());
     callback.onChange();
   }
-  if (data.type === 'endSession') {
-    localStorage.setItem('appStatus', APP_IDLE.toString());
-    appState.status = APP_IDLE;
+  if (data.type === 'sessionChange') {
+    await readFromLocalStorage();
     callback.onChange();
   }
   if (data.type === 'updateTask') {
@@ -73,21 +80,51 @@ channel.addEventListener('message', async (e) => {
   }
 });
 
-export function startSession() {
+export function rollcall() {
+  appState.tabs = [appState.tabId];
+  postMessage({ type: 'rollcallInit', id: 0 });
+  callback.onChange();
+}
+
+export async function startSession() {
   appState.status = APP_ACTIVE;
+  appState.sessionId = getId(); // TODO
+  appState.checkpoint = Date.now();
   callback.onChange();
-  postTaskMessage({ type: 'startSession', id: 0 });
+  await writeToLocalStorage();
+  postMessage({ type: 'sessionChange', id: 0 });
 }
-export function pauseSession() {
+export async function pauseSession() {
   appState.status = APP_PAUSED;
+  appState.checkpoint = Date.now();
   callback.onChange();
-  postTaskMessage({ type: 'pauseSession', id: 0 });
+  await writeToLocalStorage();
+  postMessage({ type: 'sessionChange', id: 0 });
 }
-export function endSession() {
+export async function endSession() {
   appState.status = APP_IDLE;
+  appState.sessionId = 0;
+  appState.checkpoint = 0;
   callback.onChange();
-  postTaskMessage({ type: 'endSession', id: 0 });
+  await writeToLocalStorage();
+  postMessage({ type: 'sessionChange', id: 0 });
 }
+
+window.addEventListener('beforeunload', async function (event) {
+  let tabs: string[] = [];
+  await navigator.locks.request('localStorage', async () => {
+    tabs = JSON.parse(localStorage.getItem('tabs') || '[]');
+    tabs = appState.tabs.filter((tab) => tab !== appState.tabId);
+    appState.tabs = tabs;
+    localStorage.setItem('tabs', JSON.stringify(tabs));
+  });
+  if (appState.status !== APP_IDLE && tabs.length === 0) {
+    console.log('Session is active.');
+    event.preventDefault();
+    endSession();
+    // event.returnValue = 'Are you sure you want to leave?';
+  }
+});
 
 async function storeTask(config: Task) {
   config.id = getId();
@@ -174,14 +211,14 @@ export async function createTask(taskConfig: Task) {
   const task = await storeTask(taskConfig);
   addTaskToLists(task);
   callback.onChange();
-  postTaskMessage({ type: 'updateTask', id: task.id });
+  postMessage({ type: 'updateTask', id: task.id });
 }
 
 export async function deleteTask(task: Task) {
   await taskStore.delete(task.id);
   removeTaskFromLists(task);
   callback.onChange();
-  postTaskMessage({ type: 'updateTask', id: task.id });
+  postMessage({ type: 'updateTask', id: task.id });
 }
 
 export async function updateTask(task: Task, update: Partial<Task>) {
@@ -190,5 +227,5 @@ export async function updateTask(task: Task, update: Partial<Task>) {
   await taskStore.upsert(updatedTask);
   addTaskToLists(updatedTask);
   callback.onChange();
-  postTaskMessage({ type: 'updateTask', id: task.id });
+  postMessage({ type: 'updateTask', id: task.id });
 }

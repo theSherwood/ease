@@ -22,6 +22,19 @@ export type Task = {
 
 export type TaskList = { list: Task[] };
 
+export const SESSION_ACTIVE = 0;
+export const SESSION_PAUSED = 1;
+
+export type SessionKind = typeof SESSION_ACTIVE | typeof SESSION_PAUSED;
+
+export type SessionSegment = {
+  id: number;
+  sessionId: number;
+  kind: SessionKind;
+  start: number;
+  end: number;
+};
+
 export const APP_IDLE = 0;
 export const APP_ACTIVE = 1;
 export const APP_PAUSED = 2;
@@ -29,7 +42,16 @@ export const APP_PAUSED = 2;
 export type AppStatus = typeof APP_ACTIVE | typeof APP_PAUSED | typeof APP_IDLE;
 
 export type AppState = {
+  tabId: string;
+  tabs: string[];
+
   status: AppStatus;
+  sessionId: number;
+  checkpoint: number;
+  countup: boolean;
+  pomodoroDuration: number;
+  breakDuration: number;
+
   sessionTasks: TaskList;
   recurringTasks: TaskList;
   completedTasks: TaskList;

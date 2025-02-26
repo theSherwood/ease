@@ -11,6 +11,7 @@ import {
   startSession,
   endSession,
   pauseSession,
+  rollcall,
 } from './events';
 import { render, diff, h, dom, DNode } from './vdom';
 import {
@@ -33,55 +34,20 @@ setupStore().then(() => {
   populateTasks();
 });
 
-let commonTaskStyles = {
-  display: 'flex',
-  justifyContent: 'space-between',
-  alignItems: 'center',
-  padding: '0 1rem',
-  gap: '1rem',
-  backgroundColor: 'var(--bg-task)',
-};
+rollcall();
 
 let styles = {
   task: {
-    ...commonTaskStyles,
     borderTop: '2px solid transparent',
     borderBottom: '2px solid transparent',
     transition: 'all 0.2s ease',
   },
   taskDropTop: {
-    ...commonTaskStyles,
     borderTop: '2px solid var(--accent)',
   },
   taskDropBottom: {
-    ...commonTaskStyles,
     borderBottom: '2px solid var(--accent)',
   },
-  taskDeleteButton: {
-    padding: '0.5rem 1rem',
-    backgroundColor: 'var(--bg-danger)',
-    color: 'var(--text)',
-    border: 'none',
-    borderRadius: '4px',
-    cursor: 'pointer',
-  },
-  taskDragHandle: {
-    cursor: 'grab',
-    userSelect: 'none',
-    color: 'var(--text-muted)',
-  },
-  collapseButton: {
-    display: 'flex',
-    alignItems: 'center',
-    backgroundColor: 'transparent',
-    border: 'none',
-    color: 'var(--text-muted)',
-    cursor: 'pointer',
-    padding: '0',
-    fontSize: '1.2rem',
-    marginRight: '0.5rem',
-  },
-  sectionHeader: {},
 };
 
 /**
@@ -114,14 +80,25 @@ function parseHumanReadableTime(hrTime: string): number {
   }
 }
 
-function formatTime(time: number): string {
+function partitionTime(time: number): { hours; minutes; seconds } {
   const hours = Math.floor(time / 3600);
   const minutes = Math.floor((time % 3600) / 60);
+  const seconds = Math.floor(time % 60);
+  return { hours, minutes, seconds };
+}
+
+function formatTime(time: number): string {
+  const { hours, minutes, seconds } = partitionTime(time);
   let res = '';
   if (hours > 0) res += `${hours}h `;
   if (minutes > 0) res += `${minutes}m`;
+  if (seconds > 0) res += `${seconds}s`;
   if (res === '') res = '0m';
   return res;
+}
+
+function padTime(time: number): string {
+  return time.toString().padStart(2, '0');
 }
 
 enum DragState {
@@ -135,7 +112,7 @@ function sectionHeader({ title, collapsed, oncollapse, onexpand }) {
     {},
     button(
       {
-        style: styles.collapseButton,
+        class: 'collapse-button',
         onclick: () => {
           if (collapsed) {
             onexpand();
@@ -149,13 +126,17 @@ function sectionHeader({ title, collapsed, oncollapse, onexpand }) {
           if (e.key === 'ArrowRight') onexpand();
         },
       },
-      // collapsed ? '▸' : '▾',
-      h1({ style: styles.sectionHeader }, title),
+      div({ class: 'collapse-icon' }, collapsed ? '▸' : '▾'),
+      h1({ class: 'section-header' }, title),
     ),
   );
 }
 
-function taskView(task: Task, { dragState = DragState.None }, update) {
+function taskView(
+  { task, active = false }: { task: Task; active: boolean },
+  { dragState = DragState.None },
+  update,
+) {
   function updateTimeEstimate(e) {
     let time = parseHumanReadableTime(e.target.value);
     updateTask(task, { timeEstimate: time });
@@ -228,14 +209,16 @@ function taskView(task: Task, { dragState = DragState.None }, update) {
         e.dataTransfer.effectAllowed = 'move';
       },
     },
-    span({ style: styles.taskDragHandle }, '⠿'),
+    span({ class: 'drag-handle' }, '⠿'),
     input({
+      class: 'description-input',
       value: task.description,
       oninput: (e) => {
         updateTask(task, { description: e.target.value });
       },
     }),
     input({
+      class: 'time-input',
       value: formatTime(task.timeEstimate),
       onblur: (e) => {
         updateTimeEstimate(e);
@@ -248,6 +231,7 @@ function taskView(task: Task, { dragState = DragState.None }, update) {
     }),
     div(
       {},
+      active && button({ onclick: () => updateTask(task, { status: TASK_COMPLETED }) }, '✓'),
       task.status === TASK_RECURRING &&
         button(
           {
@@ -267,10 +251,9 @@ function taskView(task: Task, { dragState = DragState.None }, update) {
               });
             },
           },
-          'Queue',
+          '+',
         ),
-      task.status !== TASK_COMPLETED &&
-        button({ style: styles.taskDeleteButton, onclick: () => deleteTask(task) }, 'X'),
+      button({ class: 'delete-button', onclick: () => deleteTask(task) }, '✕'),
     ),
   );
 }
@@ -279,11 +262,18 @@ function activeTaskView({ activeTask }: { activeTask: Task | null }) {
   if (!activeTask) {
     return div({ className: 'active-task' }, h1({}, 'No Active Task'));
   }
-  return div({ className: 'active-task' }, h1({}, 'Active Task'), h(taskView, activeTask));
+  return div(
+    { className: 'active-task' },
+    h1({}, 'Active Task'),
+    h(taskView, { task: activeTask, key: activeTask.id, active: true }),
+  );
 }
 
 function taskListView(tasks: TaskList) {
-  const taskListDiv = div({ className: 'task-list' }, ...tasks.list.map((t) => h(taskView, t)));
+  const taskListDiv = div(
+    { className: 'task-list' },
+    ...tasks.list.map((task) => h(taskView, { task, key: task.id })),
+  );
   return taskListDiv;
 }
 
@@ -357,10 +347,39 @@ function sessionButton({ onclick, label }: { onclick: () => void; label: string 
   return button({ onclick }, label);
 }
 
+function pomodoroTimer(
+  { checkpoint, countup, pomodoroDuration }: AppState,
+  { renderSignal = 0 },
+  update,
+) {
+  setTimeout(() => {
+    if (appState.checkpoint !== checkpoint) return;
+    update({ renderSignal: renderSignal + 1 });
+  }, 400);
+  let now = Date.now();
+  let time = 0;
+  let negative = false;
+  let duration = pomodoroDuration;
+  if (countup) time = Math.floor((now - checkpoint) / 1000);
+  else time = Math.floor(duration - (now - checkpoint) / 1000);
+  if (time < 0) {
+    time = Math.abs(time);
+    negative = true;
+  }
+  let { hours, minutes, seconds } = partitionTime(time);
+  let className = 'pomodoro';
+  if (negative || (countup && time > duration)) className += ' elapsed';
+  let label = `${padTime(hours)}:${padTime(minutes)}:${padTime(seconds)}`;
+  if (negative) label = '-' + label;
+  return h1({ className }, label);
+}
+
 function ui(props: AppState) {
+  console.log('ui', appState.tabs);
   if (props.status === APP_IDLE || props.sessionTasks.list.length === 0) {
     return div(
       { className: 'tasks-bar' },
+      // props.tabs.map((tab) => p({}, tab)),
       h(sessionButton, { onclick: startSession, label: 'Start Session' }),
       h(sessionTasksView, { key: 'session', ...props }),
       h(recurringTasksView, { key: 'recurring', ...props }),
@@ -369,11 +388,18 @@ function ui(props: AppState) {
   } else {
     return div(
       { className: 'tasks-bar' },
+      // props.tabs.map((tab) => p({}, tab)),
+      // pomodoro timer
+      h(pomodoroTimer, props),
+      // buttons
       props.status === APP_ACTIVE
-        ? h(sessionButton, { onclick: pauseSession, label: 'Pause Session' })
-        : h(sessionButton, { onclick: startSession, label: 'Resume Session' }),
+        ? h(sessionButton, { onclick: pauseSession, label: 'Take Break' })
+        : h(sessionButton, { onclick: startSession, label: 'Resume' }),
+      span({}, ' '),
       h(sessionButton, { onclick: endSession, label: 'End Session' }),
+      // active task
       h(activeTaskView, { key: 'active', activeTask: props.sessionTasks.list[0] }),
+      // task lists
       h(sessionTasksView, {
         key: 'session',
         ...props,
@@ -389,6 +415,7 @@ const root = document.getElementById('app') as DNode;
 render(h(ui, appState), root);
 
 function redraw() {
+  console.log('redraw');
   diff(h(ui, appState), root, root._vnode!);
 }
 

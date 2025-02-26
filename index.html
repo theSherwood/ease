@@ -25,10 +25,9 @@
 
       input {
         font-family: inherit;
-        font-size: 1rem;
-        padding: 0.5rem;
-        border: 1px solid var(--border);
-        border-radius: 4px;
+        font-size: 0.9rem;
+        border: 1px solid transparent;
+        /* border: 1px solid var(--border); */
         background: transparent;
         color: var(--text);
       }
@@ -36,11 +35,9 @@
       button {
         font-family: inherit;
         font-size: 0.9rem;
-        padding: 0.5rem 1rem;
         background-color: var(--accent);
         color: white;
         border: none;
-        border-radius: 4px;
         cursor: pointer;
         transition: opacity 0.2s ease;
       }
@@ -49,13 +46,64 @@
         opacity: 0.9;
       }
 
-      .task-list {
-        max-width: 800px;
-      }
-
       h1 {
         color: var(--text);
-        font-size: 1.5rem;
+        font-size: 1rem;
+      }
+
+      .pomodoro {
+      }
+      .pomodoro.elapsed {
+        color: var(--bg-danger);
+      }
+
+      .task {
+        max-width: 800px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 0 1rem;
+        gap: 1rem;
+        background-color: var(--bg-task);
+      }
+
+      .task .delete-button {
+        background-color: var(--bg-danger);
+        color: var(--text);
+        border: none;
+        cursor: pointer;
+      }
+      .task .drag-handle {
+        cursor: grab;
+        user-select: none;
+        color: var(--text-muted);
+      }
+
+      .collapse-button {
+        display: flex;
+        align-items: center;
+        background-color: transparent;
+        border: none;
+        color: var(--text-muted);
+        cursor: pointer;
+        padding: 0;
+        font-size: 1.2rem;
+        margin-right: 0.5rem;
+      }
+
+      .description-input {
+        flex: 1 1;
+      }
+      .time-input {
+        max-width: 6rem;
+      }
+
+      .collapse-button {
+        position: relative;
+      }
+      .collapse-icon {
+        position: absolute;
+        left: -1rem;
       }
     </style>
   </head>

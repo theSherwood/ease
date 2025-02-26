@@ -1,10 +1,40 @@
-import { Task } from './types';
+import { SessionSegment, Task } from './types';
 
 export const EASE_STORE = 'ease_store';
+
+let maxSessionId = 0;
+export function getSessionId() {
+  return ++maxSessionId;
+}
 
 let maxId = 0;
 export function getId() {
   return ++maxId;
+}
+
+export function getColumnMax(db: IDBDatabase, storeName: string, column: string): Promise<number> {
+  return new Promise((resolve, reject) => {
+    let store;
+    try {
+      const transaction = db.transaction(storeName, 'readonly');
+      store = transaction.objectStore(storeName);
+    } catch (e) {
+      console.warn(e);
+      resolve(0);
+    }
+    let index = store.index('myColumn');
+    // Use the .openCursor() method with descending order on the primary key
+    const request = index.openCursor(null, 'prev');
+    request.onsuccess = (event) => {
+      const cursor = event.target.result;
+      if (cursor) {
+        resolve(cursor.value[column]); // Max value
+      } else {
+        resolve(0); // No records found
+      }
+    };
+    request.onerror = () => reject(`Error retrieving max "${column}"`);
+  });
 }
 
 export function getMaxIdForStore(db: IDBDatabase, storeName: string): Promise<number> {
@@ -17,10 +47,8 @@ export function getMaxIdForStore(db: IDBDatabase, storeName: string): Promise<nu
       console.warn(e);
       resolve(0);
     }
-
     // Use the .openCursor() method with descending order on the primary key
     const request = store.openCursor(null, 'prev');
-
     request.onsuccess = (event) => {
       const cursor = event.target.result;
       if (cursor) {
@@ -29,7 +57,6 @@ export function getMaxIdForStore(db: IDBDatabase, storeName: string): Promise<nu
         resolve(0); // No records found
       }
     };
-
     request.onerror = () => reject('Error retrieving max ID');
   });
 }
@@ -110,10 +137,16 @@ export class ListStore<T extends HasId> {
   db: IDBDatabase | null = null;
   readonly dbName: string;
   readonly storeName: string;
+  readonly indexes: { name: string; unique: boolean }[];
 
-  constructor(dbName: string, storeName: string) {
+  constructor(
+    dbName: string,
+    storeName: string,
+    options: { indexes?: { name: string; unique: boolean }[] } = { indexes: [] },
+  ) {
     this.dbName = dbName;
     this.storeName = storeName;
+    this.indexes = options.indexes || [];
   }
 
   async connect(): Promise<IDBDatabase> {
@@ -130,11 +163,16 @@ export class ListStore<T extends HasId> {
 
       request.onupgradeneeded = (event) => {
         const db = (event.target as IDBOpenDBRequest).result;
+        let store;
         if (!db.objectStoreNames.contains(this.storeName)) {
-          db.createObjectStore(this.storeName, {
-            keyPath: 'id',
-            autoIncrement: true,
-          });
+          store = db.createObjectStore(this.storeName, { keyPath: 'id', autoIncrement: true });
+        } else {
+          store = (event.target as IDBOpenDBRequest).transaction!.objectStore('myStore');
+        }
+        for (const { name, unique } of this.indexes) {
+          if (!store.indexNames.contains(name)) {
+            store.createIndex(name, name, { unique });
+          }
         }
       };
     });
@@ -229,8 +267,13 @@ export class ListStore<T extends HasId> {
   }
 }
 
-export const taskStore = new ListStore<Task>(EASE_STORE, 'tasks');
+export const taskStore = new ListStore<Task>(EASE_STORE, 'tasks', {
+  indexes: [{ name: 'id', unique: true }],
+});
 export const audioStore = new ListStore<Task>(EASE_STORE, 'audio');
+export const sessionSegmentStore = new ListStore<SessionSegment>(EASE_STORE, 'sessionSegments', {
+  indexes: [{ name: 'sessionId', unique: false }],
+});
 
 export async function setupStore() {
   await taskStore.connect();
@@ -239,4 +282,6 @@ export async function setupStore() {
   if (id > maxId) maxId = id;
   id = await getMaxIdForStore(audioStore.db!, 'audio');
   if (id > maxId) maxId = id;
+  maxSessionId = await getMaxIdForStore(sessionSegmentStore.db!, 'sessionSegments');
+  console.log('maxSessionId', maxSessionId);
 }

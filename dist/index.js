@@ -180,6 +180,7 @@ function generateKeyBetween(a, b, digits = BASE_62_DIGITS) {
 
 // src/storage.ts
 var EASE_STORE = "ease_store";
+var maxSessionId = 0;
 var maxId = 0;
 function getId() {
   return ++maxId;
@@ -207,12 +208,14 @@ function getMaxIdForStore(db, storeName) {
   });
 }
 var ListStore = class {
-  constructor(dbName, storeName) {
+  constructor(dbName, storeName, options = { indexes: [] }) {
     __publicField(this, "db", null);
     __publicField(this, "dbName");
     __publicField(this, "storeName");
+    __publicField(this, "indexes");
     this.dbName = dbName;
     this.storeName = storeName;
+    this.indexes = options.indexes || [];
   }
   async connect() {
     if (this.db) return this.db;
@@ -225,11 +228,16 @@ var ListStore = class {
       };
       request.onupgradeneeded = (event) => {
         const db = event.target.result;
+        let store;
         if (!db.objectStoreNames.contains(this.storeName)) {
-          db.createObjectStore(this.storeName, {
-            keyPath: "id",
-            autoIncrement: true
-          });
+          store = db.createObjectStore(this.storeName, { keyPath: "id", autoIncrement: true });
+        } else {
+          store = event.target.transaction.objectStore("myStore");
+        }
+        for (const { name, unique } of this.indexes) {
+          if (!store.indexNames.contains(name)) {
+            store.createIndex(name, name, { unique });
+          }
         }
       };
     });
@@ -313,8 +321,13 @@ var ListStore = class {
     }
   }
 };
-var taskStore = new ListStore(EASE_STORE, "tasks");
+var taskStore = new ListStore(EASE_STORE, "tasks", {
+  indexes: [{ name: "id", unique: true }]
+});
 var audioStore = new ListStore(EASE_STORE, "audio");
+var sessionSegmentStore = new ListStore(EASE_STORE, "sessionSegments", {
+  indexes: [{ name: "sessionId", unique: false }]
+});
 async function setupStore() {
   await taskStore.connect();
   await audioStore.connect();
@@ -322,18 +335,56 @@ async function setupStore() {
   if (id > maxId) maxId = id;
   id = await getMaxIdForStore(audioStore.db, "audio");
   if (id > maxId) maxId = id;
+  maxSessionId = await getMaxIdForStore(sessionSegmentStore.db, "sessionSegments");
+  console.log("maxSessionId", maxSessionId);
 }
 
 // src/state.ts
+var POMODORO_DURATION_DEFAULT = 25 * 60;
+var BREAK_DURATION_DEFAULT = 5 * 60;
 var sessionTasks = { list: [] };
 var recurringTasks = { list: [] };
 var completedTasks = { list: [] };
+var tabId = Math.random().toString(36);
+console.log("tabId", tabId);
 var appState = {
+  tabId,
+  tabs: [tabId],
   status: Number(localStorage.getItem("appStatus")),
+  sessionId: Number(localStorage.getItem("sessionId")) || 0,
+  checkpoint: Number(localStorage.getItem("checkpoint")) || 0,
+  countup: true,
+  pomodoroDuration: POMODORO_DURATION_DEFAULT,
+  breakDuration: BREAK_DURATION_DEFAULT,
   sessionTasks,
   recurringTasks,
   completedTasks
 };
+function boolFromString(value, defaultBool = true) {
+  if (value === "true") return true;
+  if (value === "false") return false;
+  return defaultBool;
+}
+async function readFromLocalStorage() {
+  await navigator.locks.request("localStorage", async () => {
+    appState.status = Number(localStorage.getItem("appStatus"));
+    appState.sessionId = Number(localStorage.getItem("sessionId")) || 0;
+    appState.checkpoint = Number(localStorage.getItem("checkpoint")) || 0;
+    appState.countup = boolFromString(localStorage.getItem("countup"), true);
+    appState.pomodoroDuration = Number(localStorage.getItem("pomodoroDefault")) || POMODORO_DURATION_DEFAULT;
+    appState.breakDuration = Number(localStorage.getItem("breakDefault")) || BREAK_DURATION_DEFAULT;
+  });
+}
+async function writeToLocalStorage() {
+  await navigator.locks.request("localStorage", async () => {
+    localStorage.setItem("appStatus", appState.status.toString());
+    localStorage.setItem("sessionId", appState.sessionId.toString());
+    localStorage.setItem("checkpoint", appState.checkpoint.toString());
+    localStorage.setItem("countup", appState.countup.toString());
+    localStorage.setItem("pomodoroDefault", appState.pomodoroDuration.toString());
+    localStorage.setItem("breakDefault", appState.breakDuration.toString());
+  });
+}
 
 // src/types.ts
 var TASK_SESSION = 0;
@@ -349,27 +400,24 @@ var callback = {
     console.log("callback onChange");
   }
 };
-var windowId = Math.random().toString(36);
 var channel = new BroadcastChannel("ease");
-function postTaskMessage(data) {
-  channel.postMessage({ data, windowId });
+function postMessage(data) {
+  channel.postMessage({ data, tabId: appState.tabId });
 }
 channel.addEventListener("message", async (e) => {
-  let data = e.data.data;
+  let { data, tabId: tabId2 } = e.data;
   console.log("received message", data);
-  if (data.type === "startSession") {
-    localStorage.setItem("appStatus", APP_ACTIVE.toString());
-    appState.status = APP_ACTIVE;
+  if (data.type === "rollcallInit") {
+    appState.tabs = [appState.tabId, tabId2];
+    postMessage({ type: "rollcallRespond", id: 0 });
     callback.onChange();
   }
-  if (data.type === "pauseSession") {
-    localStorage.setItem("appStatus", APP_PAUSED.toString());
-    appState.status = APP_PAUSED;
+  if (data.type === "rollcallRespond") {
+    appState.tabs.push(tabId2.toString());
     callback.onChange();
   }
-  if (data.type === "endSession") {
-    localStorage.setItem("appStatus", APP_IDLE.toString());
-    appState.status = APP_IDLE;
+  if (data.type === "sessionChange") {
+    await readFromLocalStorage();
     callback.onChange();
   }
   if (data.type === "updateTask") {
@@ -384,21 +432,48 @@ channel.addEventListener("message", async (e) => {
   if (data.type === "resetAudio") {
   }
 });
-function startSession() {
+function rollcall() {
+  appState.tabs = [appState.tabId];
+  postMessage({ type: "rollcallInit", id: 0 });
+  callback.onChange();
+}
+async function startSession() {
   appState.status = APP_ACTIVE;
+  appState.sessionId = getId();
+  appState.checkpoint = Date.now();
   callback.onChange();
-  postTaskMessage({ type: "startSession", id: 0 });
+  await writeToLocalStorage();
+  postMessage({ type: "sessionChange", id: 0 });
 }
-function pauseSession() {
+async function pauseSession() {
   appState.status = APP_PAUSED;
+  appState.checkpoint = Date.now();
   callback.onChange();
-  postTaskMessage({ type: "pauseSession", id: 0 });
+  await writeToLocalStorage();
+  postMessage({ type: "sessionChange", id: 0 });
 }
-function endSession() {
+async function endSession() {
   appState.status = APP_IDLE;
+  appState.sessionId = 0;
+  appState.checkpoint = 0;
   callback.onChange();
-  postTaskMessage({ type: "endSession", id: 0 });
+  await writeToLocalStorage();
+  postMessage({ type: "sessionChange", id: 0 });
 }
+window.addEventListener("beforeunload", async function(event) {
+  let tabs = [];
+  await navigator.locks.request("localStorage", async () => {
+    tabs = JSON.parse(localStorage.getItem("tabs") || "[]");
+    tabs = appState.tabs.filter((tab) => tab !== appState.tabId);
+    appState.tabs = tabs;
+    localStorage.setItem("tabs", JSON.stringify(tabs));
+  });
+  if (appState.status !== APP_IDLE && tabs.length === 0) {
+    console.log("Session is active.");
+    event.preventDefault();
+    endSession();
+  }
+});
 async function storeTask(config) {
   config.id = getId();
   if (!config.fridx) {
@@ -470,13 +545,13 @@ async function createTask(taskConfig) {
   const task = await storeTask(taskConfig);
   addTaskToLists(task);
   callback.onChange();
-  postTaskMessage({ type: "updateTask", id: task.id });
+  postMessage({ type: "updateTask", id: task.id });
 }
 async function deleteTask(task) {
   await taskStore.delete(task.id);
   removeTaskFromLists(task);
   callback.onChange();
-  postTaskMessage({ type: "updateTask", id: task.id });
+  postMessage({ type: "updateTask", id: task.id });
 }
 async function updateTask(task, update) {
   removeTaskFromLists(task);
@@ -484,7 +559,7 @@ async function updateTask(task, update) {
   await taskStore.upsert(updatedTask);
   addTaskToLists(updatedTask);
   callback.onChange();
-  postTaskMessage({ type: "updateTask", id: task.id });
+  postMessage({ type: "updateTask", id: task.id });
 }
 
 // src/vdom.ts
@@ -545,7 +620,6 @@ function diff(newVNode, dom2, oldVNode, currentChildIndex = -1) {
             if (name in newDom || (name = name.toLowerCase()) in newDom) {
               newDom[name] = value;
             } else if (value != null) {
-              console.log(name, value, newVNode._props);
               newDom.setAttribute(name, value);
             } else {
               newDom.removeAttribute(name);
@@ -597,54 +671,19 @@ var DEFAULT_TASK_TIME = 25 * 60;
 setupStore().then(() => {
   populateTasks();
 });
-var commonTaskStyles = {
-  display: "flex",
-  justifyContent: "space-between",
-  alignItems: "center",
-  padding: "0 1rem",
-  gap: "1rem",
-  backgroundColor: "var(--bg-task)"
-};
+rollcall();
 var styles = {
   task: {
-    ...commonTaskStyles,
     borderTop: "2px solid transparent",
     borderBottom: "2px solid transparent",
     transition: "all 0.2s ease"
   },
   taskDropTop: {
-    ...commonTaskStyles,
     borderTop: "2px solid var(--accent)"
   },
   taskDropBottom: {
-    ...commonTaskStyles,
     borderBottom: "2px solid var(--accent)"
-  },
-  taskDeleteButton: {
-    padding: "0.5rem 1rem",
-    backgroundColor: "var(--bg-danger)",
-    color: "var(--text)",
-    border: "none",
-    borderRadius: "4px",
-    cursor: "pointer"
-  },
-  taskDragHandle: {
-    cursor: "grab",
-    userSelect: "none",
-    color: "var(--text-muted)"
-  },
-  collapseButton: {
-    display: "flex",
-    alignItems: "center",
-    backgroundColor: "transparent",
-    border: "none",
-    color: "var(--text-muted)",
-    cursor: "pointer",
-    padding: "0",
-    fontSize: "1.2rem",
-    marginRight: "0.5rem"
-  },
-  sectionHeader: {}
+  }
 };
 function parseHumanReadableTime(hrTime) {
   try {
@@ -669,21 +708,30 @@ function parseHumanReadableTime(hrTime) {
     return DEFAULT_TASK_TIME;
   }
 }
-function formatTime(time) {
+function partitionTime(time) {
   const hours = Math.floor(time / 3600);
   const minutes = Math.floor(time % 3600 / 60);
+  const seconds = Math.floor(time % 60);
+  return { hours, minutes, seconds };
+}
+function formatTime(time) {
+  const { hours, minutes, seconds } = partitionTime(time);
   let res = "";
   if (hours > 0) res += `${hours}h `;
   if (minutes > 0) res += `${minutes}m`;
+  if (seconds > 0) res += `${seconds}s`;
   if (res === "") res = "0m";
   return res;
+}
+function padTime(time) {
+  return time.toString().padStart(2, "0");
 }
 function sectionHeader({ title, collapsed, oncollapse, onexpand }) {
   return div(
     {},
     button(
       {
-        style: styles.collapseButton,
+        class: "collapse-button",
         onclick: () => {
           if (collapsed) {
             onexpand();
@@ -697,12 +745,12 @@ function sectionHeader({ title, collapsed, oncollapse, onexpand }) {
           if (e.key === "ArrowRight") onexpand();
         }
       },
-      // collapsed ? '▸' : '▾',
-      h1({ style: styles.sectionHeader }, title)
+      div({ class: "collapse-icon" }, collapsed ? "\u25B8" : "\u25BE"),
+      h1({ class: "section-header" }, title)
     )
   );
 }
-function taskView(task, { dragState = 0 /* None */ }, update) {
+function taskView({ task, active = false }, { dragState = 0 /* None */ }, update) {
   function updateTimeEstimate(e) {
     let time = parseHumanReadableTime(e.target.value);
     updateTask(task, { timeEstimate: time });
@@ -769,14 +817,16 @@ function taskView(task, { dragState = 0 /* None */ }, update) {
         e.dataTransfer.effectAllowed = "move";
       }
     },
-    span({ style: styles.taskDragHandle }, "\u283F"),
+    span({ class: "drag-handle" }, "\u283F"),
     input({
+      class: "description-input",
       value: task.description,
       oninput: (e) => {
         updateTask(task, { description: e.target.value });
       }
     }),
     input({
+      class: "time-input",
       value: formatTime(task.timeEstimate),
       onblur: (e) => {
         updateTimeEstimate(e);
@@ -789,6 +839,7 @@ function taskView(task, { dragState = 0 /* None */ }, update) {
     }),
     div(
       {},
+      active && button({ onclick: () => updateTask(task, { status: TASK_COMPLETED }) }, "\u2713"),
       task.status === TASK_RECURRING && button(
         {
           onclick: () => {
@@ -807,9 +858,9 @@ function taskView(task, { dragState = 0 /* None */ }, update) {
             });
           }
         },
-        "Queue"
+        "+"
       ),
-      task.status !== TASK_COMPLETED && button({ style: styles.taskDeleteButton, onclick: () => deleteTask(task) }, "X")
+      button({ class: "delete-button", onclick: () => deleteTask(task) }, "\u2715")
     )
   );
 }
@@ -817,10 +868,17 @@ function activeTaskView({ activeTask }) {
   if (!activeTask) {
     return div({ className: "active-task" }, h1({}, "No Active Task"));
   }
-  return div({ className: "active-task" }, h1({}, "Active Task"), h(taskView, activeTask));
+  return div(
+    { className: "active-task" },
+    h1({}, "Active Task"),
+    h(taskView, { task: activeTask, key: activeTask.id, active: true })
+  );
 }
 function taskListView(tasks) {
-  const taskListDiv = div({ className: "task-list" }, ...tasks.list.map((t) => h(taskView, t)));
+  const taskListDiv = div(
+    { className: "task-list" },
+    ...tasks.list.map((task) => h(taskView, { task, key: task.id }))
+  );
   return taskListDiv;
 }
 function newTaskInput({ status }) {
@@ -886,10 +944,34 @@ function completedTasksView({ completedTasks: completedTasks2 }, { collapsed = t
 function sessionButton({ onclick, label }) {
   return button({ onclick }, label);
 }
+function pomodoroTimer({ checkpoint, countup, pomodoroDuration }, { renderSignal = 0 }, update) {
+  setTimeout(() => {
+    if (appState.checkpoint !== checkpoint) return;
+    update({ renderSignal: renderSignal + 1 });
+  }, 400);
+  let now = Date.now();
+  let time = 0;
+  let negative = false;
+  let duration = pomodoroDuration;
+  if (countup) time = Math.floor((now - checkpoint) / 1e3);
+  else time = Math.floor(duration - (now - checkpoint) / 1e3);
+  if (time < 0) {
+    time = Math.abs(time);
+    negative = true;
+  }
+  let { hours, minutes, seconds } = partitionTime(time);
+  let className = "pomodoro";
+  if (negative || countup && time > duration) className += " elapsed";
+  let label = `${padTime(hours)}:${padTime(minutes)}:${padTime(seconds)}`;
+  if (negative) label = "-" + label;
+  return h1({ className }, label);
+}
 function ui(props) {
+  console.log("ui", appState.tabs);
   if (props.status === APP_IDLE || props.sessionTasks.list.length === 0) {
     return div(
       { className: "tasks-bar" },
+      // props.tabs.map((tab) => p({}, tab)),
       h(sessionButton, { onclick: startSession, label: "Start Session" }),
       h(sessionTasksView, { key: "session", ...props }),
       h(recurringTasksView, { key: "recurring", ...props }),
@@ -898,9 +980,16 @@ function ui(props) {
   } else {
     return div(
       { className: "tasks-bar" },
-      props.status === APP_ACTIVE ? h(sessionButton, { onclick: pauseSession, label: "Pause Session" }) : h(sessionButton, { onclick: startSession, label: "Resume Session" }),
+      // props.tabs.map((tab) => p({}, tab)),
+      // pomodoro timer
+      h(pomodoroTimer, props),
+      // buttons
+      props.status === APP_ACTIVE ? h(sessionButton, { onclick: pauseSession, label: "Take Break" }) : h(sessionButton, { onclick: startSession, label: "Resume" }),
+      span({}, " "),
       h(sessionButton, { onclick: endSession, label: "End Session" }),
+      // active task
       h(activeTaskView, { key: "active", activeTask: props.sessionTasks.list[0] }),
+      // task lists
       h(sessionTasksView, {
         key: "session",
         ...props,
@@ -914,6 +1003,7 @@ function ui(props) {
 var root = document.getElementById("app");
 render(h(ui, appState), root);
 function redraw() {
+  console.log("redraw");
   diff(h(ui, appState), root, root._vnode);
 }
 callback.onChange = redraw;

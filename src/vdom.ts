@@ -6,7 +6,7 @@
 type VNode = {
   _type: string | Function;
   _props: string | Record<string, any>;
-  _children: (string | false | null | undefined | VNode)[];
+  _children: (string | number | false | null | undefined | VNode | VNode[])[];
   key: string;
   dom?: Node;
   _patched?: VNode;
@@ -103,7 +103,6 @@ export function diff(newVNode: VNode, dom: DNode, oldVNode: VNode, currentChildI
             if (name in newDom || (name = name.toLowerCase()) in newDom) {
               newDom[name] = value;
             } else if (value != null) {
-              console.log(name, value, newVNode._props);
               (newDom as Element).setAttribute(name, value);
             } else {
               (newDom as Element).removeAttribute(name);
