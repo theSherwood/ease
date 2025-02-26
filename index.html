@@ -51,10 +51,26 @@
         font-size: 1rem;
       }
 
+      .pomodoro-wrapper {
+        position: relative;
+        font-size: 2.4rem;
+      }
       .pomodoro {
       }
       .pomodoro.elapsed {
         color: var(--bg-danger);
+      }
+      .pomodoro-wrapper .flip-icon {
+        cursor: pointer;
+        color: var(--text-muted);
+        position: absolute;
+        left: -1rem;
+        top: 0;
+        bottom: 0;
+        background-color: transparent;
+        border: none;
+        padding: 0;
+        vertical-align: middle;
       }
 
       .task {

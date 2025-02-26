@@ -416,6 +416,10 @@ channel.addEventListener("message", async (e) => {
     appState.tabs.push(tabId2.toString());
     callback.onChange();
   }
+  if (data.type === "goodbye") {
+    appState.tabs = appState.tabs.filter((tab) => tab !== tabId2);
+    callback.onChange;
+  }
   if (data.type === "sessionChange") {
     await readFromLocalStorage();
     callback.onChange();
@@ -436,6 +440,12 @@ function rollcall() {
   appState.tabs = [appState.tabId];
   postMessage({ type: "rollcallInit", id: 0 });
   callback.onChange();
+}
+async function flipCountDirection() {
+  appState.countup = !appState.countup;
+  callback.onChange();
+  await writeToLocalStorage();
+  postMessage({ type: "sessionChange", id: 0 });
 }
 async function startSession() {
   appState.status = APP_ACTIVE;
@@ -461,13 +471,8 @@ async function endSession() {
   postMessage({ type: "sessionChange", id: 0 });
 }
 window.addEventListener("beforeunload", async function(event) {
-  let tabs = [];
-  await navigator.locks.request("localStorage", async () => {
-    tabs = JSON.parse(localStorage.getItem("tabs") || "[]");
-    tabs = appState.tabs.filter((tab) => tab !== appState.tabId);
-    appState.tabs = tabs;
-    localStorage.setItem("tabs", JSON.stringify(tabs));
-  });
+  let tabs = appState.tabs;
+  postMessage({ type: "goodbye", id: 0 });
   if (appState.status !== APP_IDLE && tabs.length === 0) {
     console.log("Session is active.");
     event.preventDefault();
@@ -944,9 +949,10 @@ function completedTasksView({ completedTasks: completedTasks2 }, { collapsed = t
 function sessionButton({ onclick, label }) {
   return button({ onclick }, label);
 }
-function pomodoroTimer({ checkpoint, countup, pomodoroDuration }, { renderSignal = 0 }, update) {
+function pomodoroTimer({ checkpoint, countup, pomodoroDuration, breakDuration }, { renderSignal = 0 }, update) {
   setTimeout(() => {
-    if (appState.checkpoint !== checkpoint) return;
+    if (appState.checkpoint !== checkpoint || appState.countup !== countup || appState.pomodoroDuration !== pomodoroDuration || appState.breakDuration !== breakDuration)
+      return;
     update({ renderSignal: renderSignal + 1 });
   }, 400);
   let now = Date.now();
@@ -964,7 +970,11 @@ function pomodoroTimer({ checkpoint, countup, pomodoroDuration }, { renderSignal
   if (negative || countup && time > duration) className += " elapsed";
   let label = `${padTime(hours)}:${padTime(minutes)}:${padTime(seconds)}`;
   if (negative) label = "-" + label;
-  return h1({ className }, label);
+  return div(
+    { class: "pomodoro-wrapper" },
+    button({ class: "flip-icon", onclick: flipCountDirection }, "\u2B83"),
+    span({ className }, label)
+  );
 }
 function ui(props) {
   console.log("ui", appState.tabs);

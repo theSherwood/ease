@@ -12,6 +12,7 @@ import {
   endSession,
   pauseSession,
   rollcall,
+  flipCountDirection,
 } from './events';
 import { render, diff, h, dom, DNode } from './vdom';
 import {
@@ -348,12 +349,18 @@ function sessionButton({ onclick, label }: { onclick: () => void; label: string 
 }
 
 function pomodoroTimer(
-  { checkpoint, countup, pomodoroDuration }: AppState,
+  { checkpoint, countup, pomodoroDuration, breakDuration }: AppState,
   { renderSignal = 0 },
   update,
 ) {
   setTimeout(() => {
-    if (appState.checkpoint !== checkpoint) return;
+    if (
+      appState.checkpoint !== checkpoint ||
+      appState.countup !== countup ||
+      appState.pomodoroDuration !== pomodoroDuration ||
+      appState.breakDuration !== breakDuration
+    )
+      return;
     update({ renderSignal: renderSignal + 1 });
   }, 400);
   let now = Date.now();
@@ -371,7 +378,11 @@ function pomodoroTimer(
   if (negative || (countup && time > duration)) className += ' elapsed';
   let label = `${padTime(hours)}:${padTime(minutes)}:${padTime(seconds)}`;
   if (negative) label = '-' + label;
-  return h1({ className }, label);
+  return div(
+    { class: 'pomodoro-wrapper' },
+    button({ class: 'flip-icon', onclick: flipCountDirection }, '⮃'),
+    span({ className }, label),
+  );
 }
 
 function ui(props: AppState) {

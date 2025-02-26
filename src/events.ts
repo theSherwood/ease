@@ -31,6 +31,7 @@ const channel = new BroadcastChannel('ease');
 type MessageTypes =
   | 'rollcallInit'
   | 'rollcallRespond'
+  | 'goodbye'
   | 'updateTask'
   | 'resetTasks'
   | 'resetAudio'
@@ -62,6 +63,10 @@ channel.addEventListener('message', async (e) => {
     appState.tabs.push(tabId.toString());
     callback.onChange();
   }
+  if (data.type === 'goodbye') {
+    appState.tabs = appState.tabs.filter((tab) => tab !== tabId);
+    callback.onChange;
+  }
   if (data.type === 'sessionChange') {
     await readFromLocalStorage();
     callback.onChange();
@@ -84,6 +89,13 @@ export function rollcall() {
   appState.tabs = [appState.tabId];
   postMessage({ type: 'rollcallInit', id: 0 });
   callback.onChange();
+}
+
+export async function flipCountDirection() {
+  appState.countup = !appState.countup;
+  callback.onChange();
+  await writeToLocalStorage();
+  postMessage({ type: 'sessionChange', id: 0 });
 }
 
 export async function startSession() {
@@ -111,13 +123,8 @@ export async function endSession() {
 }
 
 window.addEventListener('beforeunload', async function (event) {
-  let tabs: string[] = [];
-  await navigator.locks.request('localStorage', async () => {
-    tabs = JSON.parse(localStorage.getItem('tabs') || '[]');
-    tabs = appState.tabs.filter((tab) => tab !== appState.tabId);
-    appState.tabs = tabs;
-    localStorage.setItem('tabs', JSON.stringify(tabs));
-  });
+  let tabs = appState.tabs;
+  postMessage({ type: 'goodbye', id: 0 });
   if (appState.status !== APP_IDLE && tabs.length === 0) {
     console.log('Session is active.');
     event.preventDefault();
