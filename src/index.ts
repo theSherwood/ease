@@ -278,29 +278,52 @@ function taskListView(tasks: TaskList) {
   return taskListDiv;
 }
 
-function newTaskInput({ status }: { status: TaskStatus }) {
-  return input({
-    type: 'text',
-    placeholder: 'Add a task',
-    onkeydown: (e) => {
-      if (e.key === 'Enter') {
-        const description = e.target.value;
-        if (!description) return;
-        const time = Date.now();
-        createTask({
-          id: 0,
-          description,
-          status,
-          timeEstimate: DEFAULT_TASK_TIME,
-          timeRemaining: 0,
-          createdAt: time,
-          completedAt: 0,
-          fridx: '',
-        });
-        e.target.value = '';
-      }
-    },
+function onCreateTask(status: TaskStatus, description: string) {
+  if (!description) return;
+  const time = Date.now();
+  createTask({
+    id: 0,
+    description,
+    status,
+    timeEstimate: DEFAULT_TASK_TIME,
+    timeRemaining: 0,
+    createdAt: time,
+    completedAt: 0,
+    fridx: '',
   });
+}
+
+function newTaskInput({ status }: { status: TaskStatus }) {
+  return div(
+    { class: 'new-task' },
+    input({
+      type: 'text',
+      placeholder: 'Add a Task',
+      onkeydown: (e) => {
+        if (e.key === 'Enter') {
+          onCreateTask(status, e.target.value);
+          e.target.value = '';
+        }
+      },
+    }),
+    div(
+      {},
+      button(
+        {
+          class: 'square-button',
+          onclick: (e) => {
+            let inputEl = e.target.previousElementSibling as HTMLInputElement;
+            let value = inputEl.value;
+            if (!value) return;
+            onCreateTask(status, value);
+            inputEl.value = '';
+          },
+        },
+        '+',
+      ),
+      span({ class: 'square-button' }, ''),
+    ),
+  );
 }
 
 function sessionTasksView({ sessionTasks }: AppState, { collapsed = false }, update) {

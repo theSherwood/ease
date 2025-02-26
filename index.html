@@ -51,6 +51,10 @@
         font-size: 1rem;
       }
 
+      .square-button {
+        aspect-ratio: 1 / 1;
+      }
+
       .pomodoro-wrapper {
         position: relative;
         font-size: 2.4rem;
@@ -71,6 +75,19 @@
         border: none;
         padding: 0;
         vertical-align: middle;
+      }
+
+      .new-task {
+        max-width: 800px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 0 1rem;
+        gap: 1rem;
+        background-color: var(--border);
+      }
+      .new-task input {
+        flex: 1 1;
       }
 
       .task {
