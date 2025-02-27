@@ -298,7 +298,7 @@ function newTaskInput({ status }: { status: TaskStatus }) {
     { class: 'new-task' },
     input({
       type: 'text',
-      placeholder: 'Add a Task',
+      placeholder: 'Add a task',
       onkeydown: (e) => {
         if (e.key === 'Enter') {
           onCreateTask(status, e.target.value);
@@ -307,7 +307,7 @@ function newTaskInput({ status }: { status: TaskStatus }) {
       },
     }),
     div(
-      {},
+      { style: { display: 'flex' } },
       button(
         {
           class: 'square-button',
@@ -372,12 +372,13 @@ function sessionButton({ onclick, label }: { onclick: () => void; label: string 
 }
 
 function pomodoroTimer(
-  { checkpoint, countup, pomodoroDuration, breakDuration }: AppState,
+  { checkpoint, countup, pomodoroDuration, breakDuration, status }: AppState,
   { renderSignal = 0 },
   update,
 ) {
   setTimeout(() => {
     if (
+      appState.status !== status ||
       appState.checkpoint !== checkpoint ||
       appState.countup !== countup ||
       appState.pomodoroDuration !== pomodoroDuration ||
@@ -389,7 +390,7 @@ function pomodoroTimer(
   let now = Date.now();
   let time = 0;
   let negative = false;
-  let duration = pomodoroDuration;
+  let duration = status === APP_ACTIVE ? pomodoroDuration : breakDuration;
   if (countup) time = Math.floor((now - checkpoint) / 1000);
   else time = Math.floor(duration - (now - checkpoint) / 1000);
   if (time < 0) {

@@ -44,6 +44,7 @@ export type AppStatus = typeof APP_ACTIVE | typeof APP_PAUSED | typeof APP_IDLE;
 export type AppState = {
   tabId: string;
   tabs: string[];
+  master: string;
 
   status: AppStatus;
   sessionId: number;

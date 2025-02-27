@@ -342,6 +342,7 @@ async function setupStore() {
 // src/state.ts
 var POMODORO_DURATION_DEFAULT = 25 * 60;
 var BREAK_DURATION_DEFAULT = 5 * 60;
+var COUNTUP_DEFAULT = false;
 var sessionTasks = { list: [] };
 var recurringTasks = { list: [] };
 var completedTasks = { list: [] };
@@ -350,29 +351,36 @@ console.log("tabId", tabId);
 var appState = {
   tabId,
   tabs: [tabId],
-  status: Number(localStorage.getItem("appStatus")),
-  sessionId: Number(localStorage.getItem("sessionId")) || 0,
-  checkpoint: Number(localStorage.getItem("checkpoint")) || 0,
-  countup: true,
-  pomodoroDuration: POMODORO_DURATION_DEFAULT,
-  breakDuration: BREAK_DURATION_DEFAULT,
+  master: tabId,
+  // Stored in localStorage
+  status: 0,
+  sessionId: 0,
+  checkpoint: 0,
+  pomodoroDuration: 0,
+  breakDuration: 0,
+  countup: false,
+  // Task data
   sessionTasks,
   recurringTasks,
   completedTasks
 };
+readFromLocalStorageUnsafe();
 function boolFromString(value, defaultBool = true) {
   if (value === "true") return true;
   if (value === "false") return false;
   return defaultBool;
 }
+function readFromLocalStorageUnsafe() {
+  appState.status = Number(localStorage.getItem("appStatus"));
+  appState.sessionId = Number(localStorage.getItem("sessionId")) || 0;
+  appState.checkpoint = Number(localStorage.getItem("checkpoint")) || 0;
+  appState.pomodoroDuration = Number(localStorage.getItem("pomodoroDefault")) || POMODORO_DURATION_DEFAULT;
+  appState.breakDuration = Number(localStorage.getItem("breakDefault")) || BREAK_DURATION_DEFAULT;
+  appState.countup = boolFromString(localStorage.getItem("countup"), COUNTUP_DEFAULT);
+}
 async function readFromLocalStorage() {
   await navigator.locks.request("localStorage", async () => {
-    appState.status = Number(localStorage.getItem("appStatus"));
-    appState.sessionId = Number(localStorage.getItem("sessionId")) || 0;
-    appState.checkpoint = Number(localStorage.getItem("checkpoint")) || 0;
-    appState.countup = boolFromString(localStorage.getItem("countup"), true);
-    appState.pomodoroDuration = Number(localStorage.getItem("pomodoroDefault")) || POMODORO_DURATION_DEFAULT;
-    appState.breakDuration = Number(localStorage.getItem("breakDefault")) || BREAK_DURATION_DEFAULT;
+    readFromLocalStorageUnsafe();
   });
 }
 async function writeToLocalStorage() {
@@ -380,9 +388,9 @@ async function writeToLocalStorage() {
     localStorage.setItem("appStatus", appState.status.toString());
     localStorage.setItem("sessionId", appState.sessionId.toString());
     localStorage.setItem("checkpoint", appState.checkpoint.toString());
-    localStorage.setItem("countup", appState.countup.toString());
     localStorage.setItem("pomodoroDefault", appState.pomodoroDuration.toString());
     localStorage.setItem("breakDefault", appState.breakDuration.toString());
+    localStorage.setItem("countup", appState.countup.toString());
   });
 }
 
@@ -402,22 +410,24 @@ var callback = {
 };
 var channel = new BroadcastChannel("ease");
 function postMessage(data) {
-  channel.postMessage({ data, tabId: appState.tabId });
+  channel.postMessage({ data, sender: appState.tabId });
 }
 channel.addEventListener("message", async (e) => {
-  let { data, tabId: tabId2 } = e.data;
+  let { data, sender } = e.data;
   console.log("received message", data);
   if (data.type === "rollcallInit") {
-    appState.tabs = [appState.tabId, tabId2];
+    appState.tabs = [appState.tabId, sender];
+    appState.master = appState.tabId;
     postMessage({ type: "rollcallRespond", id: 0 });
     callback.onChange();
   }
   if (data.type === "rollcallRespond") {
-    appState.tabs.push(tabId2.toString());
+    appState.tabs.push(sender.toString());
     callback.onChange();
   }
   if (data.type === "goodbye") {
-    appState.tabs = appState.tabs.filter((tab) => tab !== tabId2);
+    appState.tabs = appState.tabs.filter((tab) => tab !== sender);
+    appState.master = data.tabId;
     callback.onChange;
   }
   if (data.type === "sessionChange") {
@@ -472,8 +482,8 @@ async function endSession() {
 }
 window.addEventListener("beforeunload", async function(event) {
   let tabs = appState.tabs;
-  postMessage({ type: "goodbye", id: 0 });
-  if (appState.status !== APP_IDLE && tabs.length === 0) {
+  postMessage({ type: "goodbye", id: 0, tabId: tabs.filter((t) => t !== appState.tabId)[0] });
+  if (appState.status !== APP_IDLE && tabs.length === 1) {
     console.log("Session is active.");
     event.preventDefault();
     endSession();
@@ -905,7 +915,7 @@ function newTaskInput({ status }) {
     { class: "new-task" },
     input({
       type: "text",
-      placeholder: "Add a Task",
+      placeholder: "Add a task",
       onkeydown: (e) => {
         if (e.key === "Enter") {
           onCreateTask(status, e.target.value);
@@ -914,7 +924,7 @@ function newTaskInput({ status }) {
       }
     }),
     div(
-      {},
+      { style: { display: "flex" } },
       button(
         {
           class: "square-button",
@@ -971,16 +981,16 @@ function completedTasksView({ completedTasks: completedTasks2 }, { collapsed = t
 function sessionButton({ onclick, label }) {
   return button({ onclick }, label);
 }
-function pomodoroTimer({ checkpoint, countup, pomodoroDuration, breakDuration }, { renderSignal = 0 }, update) {
+function pomodoroTimer({ checkpoint, countup, pomodoroDuration, breakDuration, status }, { renderSignal = 0 }, update) {
   setTimeout(() => {
-    if (appState.checkpoint !== checkpoint || appState.countup !== countup || appState.pomodoroDuration !== pomodoroDuration || appState.breakDuration !== breakDuration)
+    if (appState.status !== status || appState.checkpoint !== checkpoint || appState.countup !== countup || appState.pomodoroDuration !== pomodoroDuration || appState.breakDuration !== breakDuration)
       return;
     update({ renderSignal: renderSignal + 1 });
   }, 400);
   let now = Date.now();
   let time = 0;
   let negative = false;
-  let duration = pomodoroDuration;
+  let duration = status === APP_ACTIVE ? pomodoroDuration : breakDuration;
   if (countup) time = Math.floor((now - checkpoint) / 1e3);
   else time = Math.floor(duration - (now - checkpoint) / 1e3);
   if (time < 0) {

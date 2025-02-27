@@ -39,32 +39,35 @@ type MessageTypes =
 type MessageData = {
   type: MessageTypes;
   id: number;
+  tabId?: string;
 };
 type Message = {
   data: MessageData;
-  tabId: string;
+  sender: string;
 };
 
 // Map of pending messages and their resolvers so that the sender can await a response
 function postMessage(data: MessageData) {
-  channel.postMessage({ data, tabId: appState.tabId });
+  channel.postMessage({ data, sender: appState.tabId } as Message);
 }
 
 // All tabs update state from the storage on message
 channel.addEventListener('message', async (e) => {
-  let { data, tabId }: Message = e.data;
+  let { data, sender }: Message = e.data;
   console.log('received message', data);
   if (data.type === 'rollcallInit') {
-    appState.tabs = [appState.tabId, tabId];
+    appState.tabs = [appState.tabId, sender];
+    appState.master = appState.tabId;
     postMessage({ type: 'rollcallRespond', id: 0 });
     callback.onChange();
   }
   if (data.type === 'rollcallRespond') {
-    appState.tabs.push(tabId.toString());
+    appState.tabs.push(sender.toString());
     callback.onChange();
   }
   if (data.type === 'goodbye') {
-    appState.tabs = appState.tabs.filter((tab) => tab !== tabId);
+    appState.tabs = appState.tabs.filter((tab) => tab !== sender);
+    appState.master = data.tabId as string;
     callback.onChange;
   }
   if (data.type === 'sessionChange') {
@@ -124,12 +127,11 @@ export async function endSession() {
 
 window.addEventListener('beforeunload', async function (event) {
   let tabs = appState.tabs;
-  postMessage({ type: 'goodbye', id: 0 });
-  if (appState.status !== APP_IDLE && tabs.length === 0) {
+  postMessage({ type: 'goodbye', id: 0, tabId: tabs.filter((t) => t !== appState.tabId)[0] });
+  if (appState.status !== APP_IDLE && tabs.length === 1) {
     console.log('Session is active.');
     event.preventDefault();
     endSession();
-    // event.returnValue = 'Are you sure you want to leave?';
   }
 });
 
