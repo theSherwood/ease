@@ -16,7 +16,7 @@ import {
   TaskList,
   TaskStatus,
   APP_ACTIVE,
-  APP_PAUSED,
+  APP_BREAK,
   APP_IDLE,
   AppStatus,
 } from './types';
@@ -33,7 +33,6 @@ type MessageTypes =
   | 'rollcallRespond'
   | 'goodbye'
   | 'updateTask'
-  | 'resetTasks'
   | 'resetAudio'
   | 'sessionChange';
 type MessageData = {
@@ -57,7 +56,6 @@ channel.addEventListener('message', async (e) => {
   console.log('received message', data);
   if (data.type === 'rollcallInit') {
     appState.tabs = [appState.tabId, sender];
-    appState.master = appState.tabId;
     postMessage({ type: 'rollcallRespond', id: 0 });
     callback.onChange();
   }
@@ -67,21 +65,20 @@ channel.addEventListener('message', async (e) => {
   }
   if (data.type === 'goodbye') {
     appState.tabs = appState.tabs.filter((tab) => tab !== sender);
-    appState.master = data.tabId as string;
+    appState.leader = data.tabId as string;
     callback.onChange;
   }
   if (data.type === 'sessionChange') {
+    appState.leader = sender;
     await readFromLocalStorage();
     callback.onChange();
   }
   if (data.type === 'updateTask') {
+    appState.leader = sender;
     removeTaskFromLists(data.id);
     const task = await taskStore.get(data.id);
     if (task !== null) addTaskToLists(task);
     callback.onChange();
-  }
-  if (data.type === 'resetTasks') {
-    await populateTasks();
   }
   if (data.type === 'resetAudio') {
     // TODO
@@ -95,6 +92,7 @@ export function rollcall() {
 }
 
 export async function flipCountDirection() {
+  appState.leader = appState.tabId;
   appState.countup = !appState.countup;
   callback.onChange();
   await writeToLocalStorage();
@@ -102,6 +100,7 @@ export async function flipCountDirection() {
 }
 
 export async function startSession() {
+  appState.leader = appState.tabId;
   appState.status = APP_ACTIVE;
   appState.sessionId = getId(); // TODO
   appState.checkpoint = Date.now();
@@ -110,13 +109,15 @@ export async function startSession() {
   postMessage({ type: 'sessionChange', id: 0 });
 }
 export async function pauseSession() {
-  appState.status = APP_PAUSED;
+  appState.leader = appState.tabId;
+  appState.status = APP_BREAK;
   appState.checkpoint = Date.now();
   callback.onChange();
   await writeToLocalStorage();
   postMessage({ type: 'sessionChange', id: 0 });
 }
 export async function endSession() {
+  appState.leader = appState.tabId;
   appState.status = APP_IDLE;
   appState.sessionId = 0;
   appState.checkpoint = 0;
@@ -217,6 +218,7 @@ export async function populateTasks() {
 }
 
 export async function createTask(taskConfig: Task) {
+  appState.leader = appState.tabId;
   const task = await storeTask(taskConfig);
   addTaskToLists(task);
   callback.onChange();
@@ -224,6 +226,7 @@ export async function createTask(taskConfig: Task) {
 }
 
 export async function deleteTask(task: Task) {
+  appState.leader = appState.tabId;
   await taskStore.delete(task.id);
   removeTaskFromLists(task);
   callback.onChange();
@@ -231,6 +234,7 @@ export async function deleteTask(task: Task) {
 }
 
 export async function updateTask(task: Task, update: Partial<Task>) {
+  appState.leader = appState.tabId;
   removeTaskFromLists(task);
   const updatedTask = { ...task, ...update };
   await taskStore.upsert(updatedTask);

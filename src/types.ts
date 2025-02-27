@@ -37,14 +37,16 @@ export type SessionSegment = {
 
 export const APP_IDLE = 0;
 export const APP_ACTIVE = 1;
-export const APP_PAUSED = 2;
+export const APP_BREAK = 2;
 
-export type AppStatus = typeof APP_ACTIVE | typeof APP_PAUSED | typeof APP_IDLE;
+export type AppStatus = typeof APP_ACTIVE | typeof APP_BREAK | typeof APP_IDLE;
 
 export type AppState = {
   tabId: string;
   tabs: string[];
-  master: string;
+  leader: string;
+
+  activeUtterance: SpeechSynthesisUtterance | null;
 
   status: AppStatus;
   sessionId: number;
@@ -52,6 +54,7 @@ export type AppState = {
   countup: boolean;
   pomodoroDuration: number;
   breakDuration: number;
+  speaker: string;
 
   sessionTasks: TaskList;
   recurringTasks: TaskList;

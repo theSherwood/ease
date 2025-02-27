@@ -1,8 +1,12 @@
 import { APP_IDLE, AppState, AppStatus, TaskList } from './types';
 
-const POMODORO_DURATION_DEFAULT = 25 * 60;
-const BREAK_DURATION_DEFAULT = 5 * 60;
+// const POMODORO_DURATION_DEFAULT = 25 * 60;
+const POMODORO_DURATION_DEFAULT = 5;
+// const BREAK_DURATION_DEFAULT = 5 * 60;
+const BREAK_DURATION_DEFAULT = 5;
 const COUNTUP_DEFAULT = false;
+// const SPEAKER_DEFAULT = 'johnny_cash';
+const SPEAKER_DEFAULT = 'rick_sanchez';
 
 export const sessionTasks: TaskList = { list: [] };
 export const recurringTasks: TaskList = { list: [] };
@@ -12,9 +16,12 @@ const tabId = Math.random().toString(36);
 console.log('tabId', tabId);
 
 export const appState: AppState = {
+  // Tab coordination
   tabId,
   tabs: [tabId],
-  master: tabId,
+  leader: '',
+
+  activeUtterance: null,
 
   // Stored in localStorage
   status: 0,
@@ -23,6 +30,7 @@ export const appState: AppState = {
   pomodoroDuration: 0,
   breakDuration: 0,
   countup: false,
+  speaker: '',
 
   // Task data
   sessionTasks,
@@ -45,6 +53,7 @@ function readFromLocalStorageUnsafe() {
     Number(localStorage.getItem('pomodoroDefault')) || POMODORO_DURATION_DEFAULT;
   appState.breakDuration = Number(localStorage.getItem('breakDefault')) || BREAK_DURATION_DEFAULT;
   appState.countup = boolFromString(localStorage.getItem('countup'), COUNTUP_DEFAULT);
+  appState.speaker = localStorage.getItem('speaker') || SPEAKER_DEFAULT;
 }
 
 export async function readFromLocalStorage() {
@@ -61,5 +70,10 @@ export async function writeToLocalStorage() {
     localStorage.setItem('pomodoroDefault', appState.pomodoroDuration.toString());
     localStorage.setItem('breakDefault', appState.breakDuration.toString());
     localStorage.setItem('countup', appState.countup.toString());
+    localStorage.setItem('speaker', appState.speaker);
   });
+}
+
+export function isLeader() {
+  return appState.tabId === appState.leader;
 }

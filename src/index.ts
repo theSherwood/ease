@@ -25,8 +25,11 @@ import {
   AppState,
   APP_IDLE,
   APP_ACTIVE,
+  APP_BREAK,
 } from './types';
-import { appState } from './state';
+import { appState, isLeader } from './state';
+import { speak } from './speech';
+import { playSpeech } from './audio';
 const { div, h1, button, p, input, span } = dom;
 
 const DEFAULT_TASK_TIME = 25 * 60;
@@ -371,33 +374,51 @@ function sessionButton({ onclick, label }: { onclick: () => void; label: string 
   return button({ onclick }, label);
 }
 
+const TWO_MINUTES = 4.9 * 60;
+
 function pomodoroTimer(
-  { checkpoint, countup, pomodoroDuration, breakDuration, status }: AppState,
-  { renderSignal = 0 },
+  { checkpoint, countup, pomodoroDuration, breakDuration, status, speaker }: AppState,
+  { renderSignal = 0, prevTimeRemaining = 0 },
   update,
 ) {
+  let now = Date.now();
+  let negative = false;
+  let duration = status === APP_ACTIVE ? pomodoroDuration : breakDuration;
+  let timeElapsed = Math.floor((now - checkpoint) / 1000);
+  let timeRemaining = Math.floor(duration - timeElapsed);
+  let time = countup ? timeElapsed : timeRemaining;
+  if (time < 0) {
+    time = Math.abs(time);
+    negative = true;
+  }
+  let { hours, minutes, seconds } = partitionTime(time);
+
   setTimeout(() => {
     if (
       appState.status !== status ||
       appState.checkpoint !== checkpoint ||
       appState.countup !== countup ||
       appState.pomodoroDuration !== pomodoroDuration ||
-      appState.breakDuration !== breakDuration
+      appState.breakDuration !== breakDuration ||
+      appState.speaker !== speaker
     )
       return;
-    update({ renderSignal: renderSignal + 1 });
+    update({ renderSignal: renderSignal + 1, prevTimeRemaining: timeRemaining });
   }, 400);
-  let now = Date.now();
-  let time = 0;
-  let negative = false;
-  let duration = status === APP_ACTIVE ? pomodoroDuration : breakDuration;
-  if (countup) time = Math.floor((now - checkpoint) / 1000);
-  else time = Math.floor(duration - (now - checkpoint) / 1000);
-  if (time < 0) {
-    time = Math.abs(time);
-    negative = true;
+
+  if (isLeader()) {
+    if (status === APP_BREAK) {
+      if (prevTimeRemaining > 0 && timeRemaining <= 0) {
+        playSpeech(`public/break_over_${appState.speaker}.mp3`);
+      }
+    }
+    if (status === APP_ACTIVE) {
+      if (prevTimeRemaining > 0 && timeRemaining <= 0) {
+        playSpeech(`public/break_start_${appState.speaker}.mp3`);
+      }
+    }
   }
-  let { hours, minutes, seconds } = partitionTime(time);
+
   let className = 'pomodoro';
   if (negative || (countup && time > duration)) className += ' elapsed';
   let label = `${padTime(hours)}:${padTime(minutes)}:${padTime(seconds)}`;
@@ -423,6 +444,7 @@ function ui(props: AppState) {
   } else {
     return div(
       { className: 'tasks-bar' },
+      div({}, isLeader() ? 'Leader' : 'Follower'),
       // props.tabs.map((tab) => p({}, tab)),
       // pomodoro timer
       h(pomodoroTimer, props),

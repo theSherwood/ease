@@ -340,18 +340,21 @@ async function setupStore() {
 }
 
 // src/state.ts
-var POMODORO_DURATION_DEFAULT = 25 * 60;
-var BREAK_DURATION_DEFAULT = 5 * 60;
+var POMODORO_DURATION_DEFAULT = 5;
+var BREAK_DURATION_DEFAULT = 5;
 var COUNTUP_DEFAULT = false;
+var SPEAKER_DEFAULT = "rick_sanchez";
 var sessionTasks = { list: [] };
 var recurringTasks = { list: [] };
 var completedTasks = { list: [] };
 var tabId = Math.random().toString(36);
 console.log("tabId", tabId);
 var appState = {
+  // Tab coordination
   tabId,
   tabs: [tabId],
-  master: tabId,
+  leader: "",
+  activeUtterance: null,
   // Stored in localStorage
   status: 0,
   sessionId: 0,
@@ -359,6 +362,7 @@ var appState = {
   pomodoroDuration: 0,
   breakDuration: 0,
   countup: false,
+  speaker: "",
   // Task data
   sessionTasks,
   recurringTasks,
@@ -377,6 +381,7 @@ function readFromLocalStorageUnsafe() {
   appState.pomodoroDuration = Number(localStorage.getItem("pomodoroDefault")) || POMODORO_DURATION_DEFAULT;
   appState.breakDuration = Number(localStorage.getItem("breakDefault")) || BREAK_DURATION_DEFAULT;
   appState.countup = boolFromString(localStorage.getItem("countup"), COUNTUP_DEFAULT);
+  appState.speaker = localStorage.getItem("speaker") || SPEAKER_DEFAULT;
 }
 async function readFromLocalStorage() {
   await navigator.locks.request("localStorage", async () => {
@@ -391,7 +396,11 @@ async function writeToLocalStorage() {
     localStorage.setItem("pomodoroDefault", appState.pomodoroDuration.toString());
     localStorage.setItem("breakDefault", appState.breakDuration.toString());
     localStorage.setItem("countup", appState.countup.toString());
+    localStorage.setItem("speaker", appState.speaker);
   });
+}
+function isLeader() {
+  return appState.tabId === appState.leader;
 }
 
 // src/types.ts
@@ -400,7 +409,7 @@ var TASK_RECURRING = 2;
 var TASK_COMPLETED = 3;
 var APP_IDLE = 0;
 var APP_ACTIVE = 1;
-var APP_PAUSED = 2;
+var APP_BREAK = 2;
 
 // src/events.ts
 var callback = {
@@ -417,7 +426,6 @@ channel.addEventListener("message", async (e) => {
   console.log("received message", data);
   if (data.type === "rollcallInit") {
     appState.tabs = [appState.tabId, sender];
-    appState.master = appState.tabId;
     postMessage({ type: "rollcallRespond", id: 0 });
     callback.onChange();
   }
@@ -427,21 +435,20 @@ channel.addEventListener("message", async (e) => {
   }
   if (data.type === "goodbye") {
     appState.tabs = appState.tabs.filter((tab) => tab !== sender);
-    appState.master = data.tabId;
+    appState.leader = data.tabId;
     callback.onChange;
   }
   if (data.type === "sessionChange") {
+    appState.leader = sender;
     await readFromLocalStorage();
     callback.onChange();
   }
   if (data.type === "updateTask") {
+    appState.leader = sender;
     removeTaskFromLists(data.id);
     const task = await taskStore.get(data.id);
     if (task !== null) addTaskToLists(task);
     callback.onChange();
-  }
-  if (data.type === "resetTasks") {
-    await populateTasks();
   }
   if (data.type === "resetAudio") {
   }
@@ -452,12 +459,14 @@ function rollcall() {
   callback.onChange();
 }
 async function flipCountDirection() {
+  appState.leader = appState.tabId;
   appState.countup = !appState.countup;
   callback.onChange();
   await writeToLocalStorage();
   postMessage({ type: "sessionChange", id: 0 });
 }
 async function startSession() {
+  appState.leader = appState.tabId;
   appState.status = APP_ACTIVE;
   appState.sessionId = getId();
   appState.checkpoint = Date.now();
@@ -466,13 +475,15 @@ async function startSession() {
   postMessage({ type: "sessionChange", id: 0 });
 }
 async function pauseSession() {
-  appState.status = APP_PAUSED;
+  appState.leader = appState.tabId;
+  appState.status = APP_BREAK;
   appState.checkpoint = Date.now();
   callback.onChange();
   await writeToLocalStorage();
   postMessage({ type: "sessionChange", id: 0 });
 }
 async function endSession() {
+  appState.leader = appState.tabId;
   appState.status = APP_IDLE;
   appState.sessionId = 0;
   appState.checkpoint = 0;
@@ -557,18 +568,21 @@ async function populateTasks() {
   callback.onChange();
 }
 async function createTask(taskConfig) {
+  appState.leader = appState.tabId;
   const task = await storeTask(taskConfig);
   addTaskToLists(task);
   callback.onChange();
   postMessage({ type: "updateTask", id: task.id });
 }
 async function deleteTask(task) {
+  appState.leader = appState.tabId;
   await taskStore.delete(task.id);
   removeTaskFromLists(task);
   callback.onChange();
   postMessage({ type: "updateTask", id: task.id });
 }
 async function updateTask(task, update) {
+  appState.leader = appState.tabId;
   removeTaskFromLists(task);
   const updatedTask = { ...task, ...update };
   await taskStore.upsert(updatedTask);
@@ -679,6 +693,54 @@ var dom = tags.reduce((acc, tag) => {
   acc[tag] = (props, ...children) => h(tag, props, ...children);
   return acc;
 }, {});
+
+// src/audio.ts
+var AudioPlayer = class {
+  constructor() {
+    __publicField(this, "audio", null);
+    __publicField(this, "currentResolver", null);
+  }
+  play(audioUrl) {
+    this.stop();
+    return new Promise((resolve, reject) => {
+      this.currentResolver = resolve;
+      this.audio = new Audio(audioUrl);
+      this.audio.addEventListener("ended", () => {
+        var _a;
+        (_a = this.currentResolver) == null ? void 0 : _a.call(this);
+        this.currentResolver = null;
+        this.audio = null;
+      });
+      this.audio.play().catch((error) => {
+        reject(error);
+        this.currentResolver = null;
+        this.audio = null;
+      });
+    });
+  }
+  stop() {
+    var _a;
+    if (this.audio) {
+      this.audio.pause();
+      this.audio.currentTime = 0;
+      (_a = this.currentResolver) == null ? void 0 : _a.call(this);
+      this.currentResolver = null;
+      this.audio = null;
+    }
+  }
+  setVolume(volume) {
+    if (this.audio) {
+      this.audio.volume = volume;
+    }
+  }
+};
+var speechPlayer = new AudioPlayer();
+var musicPlayer = new AudioPlayer();
+async function playSpeech(audioUrl) {
+  musicPlayer.setVolume(0.5);
+  await speechPlayer.play(audioUrl);
+  musicPlayer.setVolume(1);
+}
 
 // src/index.ts
 var { div, h1, button, p, input, span } = dom;
@@ -981,23 +1043,36 @@ function completedTasksView({ completedTasks: completedTasks2 }, { collapsed = t
 function sessionButton({ onclick, label }) {
   return button({ onclick }, label);
 }
-function pomodoroTimer({ checkpoint, countup, pomodoroDuration, breakDuration, status }, { renderSignal = 0 }, update) {
-  setTimeout(() => {
-    if (appState.status !== status || appState.checkpoint !== checkpoint || appState.countup !== countup || appState.pomodoroDuration !== pomodoroDuration || appState.breakDuration !== breakDuration)
-      return;
-    update({ renderSignal: renderSignal + 1 });
-  }, 400);
+var TWO_MINUTES = 4.9 * 60;
+function pomodoroTimer({ checkpoint, countup, pomodoroDuration, breakDuration, status, speaker }, { renderSignal = 0, prevTimeRemaining = 0 }, update) {
   let now = Date.now();
-  let time = 0;
   let negative = false;
   let duration = status === APP_ACTIVE ? pomodoroDuration : breakDuration;
-  if (countup) time = Math.floor((now - checkpoint) / 1e3);
-  else time = Math.floor(duration - (now - checkpoint) / 1e3);
+  let timeElapsed = Math.floor((now - checkpoint) / 1e3);
+  let timeRemaining = Math.floor(duration - timeElapsed);
+  let time = countup ? timeElapsed : timeRemaining;
   if (time < 0) {
     time = Math.abs(time);
     negative = true;
   }
   let { hours, minutes, seconds } = partitionTime(time);
+  setTimeout(() => {
+    if (appState.status !== status || appState.checkpoint !== checkpoint || appState.countup !== countup || appState.pomodoroDuration !== pomodoroDuration || appState.breakDuration !== breakDuration || appState.speaker !== speaker)
+      return;
+    update({ renderSignal: renderSignal + 1, prevTimeRemaining: timeRemaining });
+  }, 400);
+  if (isLeader()) {
+    if (status === APP_BREAK) {
+      if (prevTimeRemaining > 0 && timeRemaining <= 0) {
+        playSpeech(`public/break_over_${appState.speaker}.mp3`);
+      }
+    }
+    if (status === APP_ACTIVE) {
+      if (prevTimeRemaining > 0 && timeRemaining <= 0) {
+        playSpeech(`public/break_start_${appState.speaker}.mp3`);
+      }
+    }
+  }
   let className = "pomodoro";
   if (negative || countup && time > duration) className += " elapsed";
   let label = `${padTime(hours)}:${padTime(minutes)}:${padTime(seconds)}`;
@@ -1022,6 +1097,7 @@ function ui(props) {
   } else {
     return div(
       { className: "tasks-bar" },
+      div({}, isLeader() ? "Leader" : "Follower"),
       // props.tabs.map((tab) => p({}, tab)),
       // pomodoro timer
       h(pomodoroTimer, props),
