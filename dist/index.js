@@ -1064,12 +1064,12 @@ function pomodoroTimer({ checkpoint, countup, pomodoroDuration, breakDuration, s
   if (isLeader()) {
     if (status === APP_BREAK) {
       if (prevTimeRemaining > 0 && timeRemaining <= 0) {
-        playSpeech(`public/break_over_${appState.speaker}.mp3`);
+        playSpeech(`public/speech/break_over_${appState.speaker}.mp3`);
       }
     }
     if (status === APP_ACTIVE) {
       if (prevTimeRemaining > 0 && timeRemaining <= 0) {
-        playSpeech(`public/break_start_${appState.speaker}.mp3`);
+        playSpeech(`public/speech/break_start_${appState.speaker}.mp3`);
       }
     }
   }
