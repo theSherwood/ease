@@ -7,7 +7,7 @@ import {
   sessionTasks,
   writeToLocalStorage,
 } from './state';
-import { ListStore, EASE_STORE, getId, taskStore, audioStore } from './storage';
+import { getTaskId, taskStore } from './storage';
 import {
   TASK_COMPLETED,
   TASK_SESSION,
@@ -18,7 +18,6 @@ import {
   APP_ACTIVE,
   APP_BREAK,
   APP_IDLE,
-  AppStatus,
 } from './types';
 
 export const callback = {
@@ -102,7 +101,7 @@ export async function flipCountDirection() {
 export async function startSession() {
   appState.leader = appState.tabId;
   appState.status = APP_ACTIVE;
-  appState.sessionId = getId(); // TODO
+  appState.sessionId = getTaskId(); // TODO
   appState.checkpoint = Date.now();
   callback.onChange();
   await writeToLocalStorage();
@@ -137,7 +136,7 @@ window.addEventListener('beforeunload', async function (event) {
 });
 
 async function storeTask(config: Task) {
-  config.id = getId();
+  config.id = getTaskId();
   if (!config.fridx) {
     let lastTask;
     if (config.status === TASK_SESSION) lastTask = sessionTasks.list[sessionTasks.list.length - 1];

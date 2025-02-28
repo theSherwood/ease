@@ -179,11 +179,20 @@ function generateKeyBetween(a, b, digits = BASE_62_DIGITS) {
 }
 
 // src/storage.ts
+var DB_VERSION = 1;
 var EASE_STORE = "ease_store";
+var TASKS_STORE = "tasks";
+var AUDIO_STORE = "audio";
+var SESSION_SEGMENTS_STORE = "sessionSegments";
 var maxSessionId = 0;
-var maxId = 0;
-function getId() {
-  return ++maxId;
+var maxTaskId = 0;
+var maxAudioId = 0;
+var maxSessionSegmentId = 0;
+function getTaskId() {
+  return ++maxTaskId;
+}
+function getAudioId() {
+  return ++maxAudioId;
 }
 function getMaxIdForStore(db, storeName) {
   return new Promise((resolve, reject) => {
@@ -208,43 +217,19 @@ function getMaxIdForStore(db, storeName) {
   });
 }
 var ListStore = class {
-  constructor(dbName, storeName, options = { indexes: [] }) {
-    __publicField(this, "db", null);
-    __publicField(this, "dbName");
+  constructor(storeName) {
+    __publicField(this, "db");
     __publicField(this, "storeName");
-    __publicField(this, "indexes");
-    this.dbName = dbName;
     this.storeName = storeName;
-    this.indexes = options.indexes || [];
   }
-  async connect() {
-    if (this.db) return this.db;
-    return new Promise((resolve, reject) => {
-      const request = indexedDB.open(this.dbName, 1);
-      request.onerror = () => reject(request.error);
-      request.onsuccess = () => {
-        this.db = request.result;
-        resolve(request.result);
-      };
-      request.onupgradeneeded = (event) => {
-        const db = event.target.result;
-        let store;
-        if (!db.objectStoreNames.contains(this.storeName)) {
-          store = db.createObjectStore(this.storeName, { keyPath: "id", autoIncrement: true });
-        } else {
-          store = event.target.transaction.objectStore("myStore");
-        }
-        for (const { name, unique } of this.indexes) {
-          if (!store.indexNames.contains(name)) {
-            store.createIndex(name, name, { unique });
-          }
-        }
-      };
-    });
+  connect(db) {
+    this.db = db;
   }
   async add(record) {
-    const db = await this.connect();
+    const db = this.db;
     return new Promise((resolve, reject) => {
+      console.log("add", this.storeName, record, db);
+      console.log("Object Stores:", Array.from(db.objectStoreNames));
       const tx = db.transaction(this.storeName, "readwrite");
       const store = tx.objectStore(this.storeName);
       store.add(record);
@@ -253,7 +238,7 @@ var ListStore = class {
     });
   }
   async bulkAdd(records) {
-    const db = await this.connect();
+    const db = this.db;
     return new Promise((resolve, reject) => {
       const tx = db.transaction(this.storeName, "readwrite");
       const store = tx.objectStore(this.storeName);
@@ -265,7 +250,7 @@ var ListStore = class {
     });
   }
   async get(id) {
-    const db = await this.connect();
+    const db = this.db;
     return new Promise((resolve, reject) => {
       const tx = db.transaction(this.storeName, "readonly");
       const store = tx.objectStore(this.storeName);
@@ -275,7 +260,7 @@ var ListStore = class {
     });
   }
   async getAll() {
-    const db = await this.connect();
+    const db = this.db;
     return new Promise((resolve, reject) => {
       const tx = db.transaction(this.storeName, "readonly");
       const store = tx.objectStore(this.storeName);
@@ -285,7 +270,7 @@ var ListStore = class {
     });
   }
   async delete(id) {
-    const db = await this.connect();
+    const db = this.db;
     return new Promise((resolve, reject) => {
       const tx = db.transaction(this.storeName, "readwrite");
       const store = tx.objectStore(this.storeName);
@@ -295,7 +280,7 @@ var ListStore = class {
     });
   }
   async upsert(record) {
-    const db = await this.connect();
+    const db = this.db;
     return new Promise((resolve, reject) => {
       const tx = db.transaction(this.storeName, "readwrite");
       const store = tx.objectStore(this.storeName);
@@ -305,7 +290,7 @@ var ListStore = class {
     });
   }
   async *iterate() {
-    const db = await this.connect();
+    const db = this.db;
     const tx = db.transaction(this.storeName, "readonly");
     const store = tx.objectStore(this.storeName);
     const request = store.openCursor();
@@ -321,22 +306,248 @@ var ListStore = class {
     }
   }
 };
-var taskStore = new ListStore(EASE_STORE, "tasks", {
-  indexes: [{ name: "id", unique: true }]
-});
-var audioStore = new ListStore(EASE_STORE, "audio");
-var sessionSegmentStore = new ListStore(EASE_STORE, "sessionSegments", {
-  indexes: [{ name: "sessionId", unique: false }]
-});
+var taskStore = new ListStore(TASKS_STORE);
+var audioStore = new ListStore(AUDIO_STORE);
+var sessionSegmentStore = new ListStore(SESSION_SEGMENTS_STORE);
+var options = {
+  [TASKS_STORE]: { indexes: [{ name: "id", unique: true }] },
+  [AUDIO_STORE]: { indexes: [{ name: "id", unique: true }] },
+  [SESSION_SEGMENTS_STORE]: { indexes: [{ name: "sessionId", unique: false }] }
+};
 async function setupStore() {
-  await taskStore.connect();
-  await audioStore.connect();
+  let db;
+  const p2 = new Promise((resolve, reject) => {
+    const request = indexedDB.open(EASE_STORE, DB_VERSION);
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => {
+      db = request.result;
+      resolve(request.result);
+    };
+    request.onupgradeneeded = (event) => {
+      db = event.target.result;
+      for (const storeName of [TASKS_STORE, AUDIO_STORE, SESSION_SEGMENTS_STORE]) {
+        console.log("onupgradeneeded", storeName, options);
+        if (!db.objectStoreNames.contains(storeName)) {
+          let store = db.createObjectStore(storeName, { keyPath: "id", autoIncrement: true });
+          for (const { name, unique } of options[storeName].indexes) {
+            if (!store.indexNames.contains(name)) {
+              store.createIndex(name, name, { unique });
+            }
+          }
+        }
+      }
+    };
+  });
+  await p2;
+  taskStore.connect(db);
+  audioStore.connect(db);
+  sessionSegmentStore.connect(db);
+  console.log("Object Stores:", Array.from(db.objectStoreNames));
   let id = await getMaxIdForStore(taskStore.db, "tasks");
-  if (id > maxId) maxId = id;
+  if (id > maxTaskId) maxTaskId = id;
   id = await getMaxIdForStore(audioStore.db, "audio");
-  if (id > maxId) maxId = id;
-  maxSessionId = await getMaxIdForStore(sessionSegmentStore.db, "sessionSegments");
+  if (id > maxAudioId) maxAudioId = id;
+  id = await getMaxIdForStore(sessionSegmentStore.db, "sessionSegments");
+  if (id > maxSessionSegmentId) maxSessionSegmentId = id;
+  console.log("maxTaskId", maxTaskId);
+  console.log("maxAudioId", maxAudioId);
   console.log("maxSessionId", maxSessionId);
+}
+
+// src/types.ts
+var TASK_SESSION = 0;
+var TASK_RECURRING = 2;
+var TASK_COMPLETED = 3;
+var AUDIO_FINISHED = 0;
+var AUDIO_ABORTED = 1;
+var APP_IDLE = 0;
+var APP_ACTIVE = 1;
+var APP_BREAK = 2;
+
+// src/audioPlayer.ts
+var AudioPlayer = class {
+  constructor() {
+    __publicField(this, "audio", null);
+    __publicField(this, "currentResolver", null);
+  }
+  play(audioUrl) {
+    console.log("PLAY:", audioUrl);
+    this.stop();
+    return new Promise((resolve, reject) => {
+      this.currentResolver = resolve;
+      this.audio = new Audio(audioUrl);
+      this.audio.addEventListener("ended", () => {
+        var _a;
+        (_a = this.currentResolver) == null ? void 0 : _a.call(this, AUDIO_FINISHED);
+        this.currentResolver = null;
+        this.audio = null;
+      });
+      this.audio.play().catch((error) => {
+        reject(error);
+        this.currentResolver = null;
+        this.audio = null;
+      });
+    });
+  }
+  stop() {
+    var _a;
+    if (this.audio) {
+      this.audio.pause();
+      this.audio.currentTime = 0;
+      (_a = this.currentResolver) == null ? void 0 : _a.call(this, AUDIO_ABORTED);
+      this.currentResolver = null;
+      this.audio = null;
+    }
+  }
+  setVolume(volume) {
+    if (this.audio) {
+      this.audio.volume = volume;
+    }
+  }
+};
+var speechPlayer = new AudioPlayer();
+var musicPlayer = new AudioPlayer();
+async function playSpeech(audioUrl) {
+  musicPlayer.setVolume(0.5);
+  let res = await speechPlayer.play(audioUrl);
+  musicPlayer.setVolume(1);
+  return res;
+}
+async function playMusic(audioUrl) {
+  return musicPlayer.play(audioUrl);
+}
+function stopMusic() {
+  musicPlayer.stop();
+}
+
+// src/music.ts
+function getPeakValue(buffer) {
+  let peak = 0;
+  for (let channel2 = 0; channel2 < buffer.numberOfChannels; channel2++) {
+    const data = buffer.getChannelData(channel2);
+    for (let i = 0; i < data.length; i++) {
+      peak = Math.max(peak, Math.abs(data[i]));
+    }
+  }
+  return peak;
+}
+function normalizeAudio(ctx, source, peak) {
+  const gain = ctx.createGain();
+  gain.gain.value = peak > 0 ? 1 / peak : 1;
+  source.connect(gain);
+  return gain;
+}
+function addFadeIn(ctx, source, duration) {
+  const gain = ctx.createGain();
+  gain.gain.setValueAtTime(0, 0);
+  gain.gain.linearRampToValueAtTime(1, duration);
+  source.connect(gain);
+  return gain;
+}
+function addFadeOut(ctx, source, duration, totalDuration) {
+  const gain = ctx.createGain();
+  gain.gain.setValueAtTime(1, totalDuration - duration);
+  gain.gain.linearRampToValueAtTime(0, totalDuration);
+  source.connect(gain);
+  return gain;
+}
+function audioBufferToBlob(audioBuffer) {
+  const numOfChannels = audioBuffer.numberOfChannels;
+  const sampleRate = audioBuffer.sampleRate;
+  const format = 1;
+  const bitDepth = 16;
+  let numOfFrames = audioBuffer.length;
+  let buffer = new ArrayBuffer(44 + numOfFrames * numOfChannels * 2);
+  let view = new DataView(buffer);
+  writeString(view, 0, "RIFF");
+  view.setUint32(4, 36 + numOfFrames * numOfChannels * 2, true);
+  writeString(view, 8, "WAVE");
+  writeString(view, 12, "fmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, format, true);
+  view.setUint16(22, numOfChannels, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * numOfChannels * 2, true);
+  view.setUint16(32, numOfChannels * 2, true);
+  view.setUint16(34, bitDepth, true);
+  writeString(view, 36, "data");
+  view.setUint32(40, numOfFrames * numOfChannels * 2, true);
+  let offset = 44;
+  for (let channel2 = 0; channel2 < numOfChannels; channel2++) {
+    let channelData = audioBuffer.getChannelData(channel2);
+    for (let i = 0; i < numOfFrames; i++) {
+      let sample = Math.max(-1, Math.min(1, channelData[i]));
+      sample = sample < 0 ? sample * 32768 : sample * 32767;
+      view.setInt16(offset, sample, true);
+      offset += 2;
+    }
+  }
+  return new Blob([buffer], { type: "audio/wav" });
+}
+function writeString(view, offset, text) {
+  for (let i = 0; i < text.length; i++) {
+    view.setUint8(offset + i, text.charCodeAt(i));
+  }
+}
+async function processAudio(buffer, options2) {
+  const ctx = new OfflineAudioContext(buffer.numberOfChannels, buffer.length, buffer.sampleRate);
+  const source = ctx.createBufferSource();
+  source.buffer = buffer;
+  let node = source;
+  if (options2.normalize) node = normalizeAudio(ctx, source, getPeakValue(buffer));
+  if (options2.fadeIn) node = addFadeIn(ctx, node, options2.fadeIn);
+  if (options2.fadeOut) node = addFadeOut(ctx, node, options2.fadeOut, buffer.duration);
+  node.connect(ctx.destination);
+  source.start();
+  const renderedBuffer = await ctx.startRendering();
+  return audioBufferToBlob(renderedBuffer);
+}
+async function processAudioFile(file, options2) {
+  const audioContext = new AudioContext();
+  const arrayBuffer = await file.arrayBuffer();
+  const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+  const processed = await processAudio(audioBuffer, options2);
+  return {
+    id: -1,
+    name: file.name,
+    type: file.type,
+    data: processed,
+    lastModified: Date.now()
+  };
+}
+async function storeAudio(config) {
+  config.id = getAudioId();
+  await audioStore.add(config);
+}
+async function handleAudioUpload(files) {
+  const options2 = {
+    normalize: true,
+    fadeIn: 0.01,
+    fadeOut: 0.01
+  };
+  for (const file of files) {
+    const processedAudio = await processAudioFile(file, options2);
+    await storeAudio(processedAudio);
+  }
+}
+async function playAudioAsMusic(audio) {
+  const blob = new Blob([audio.data], { type: audio.type });
+  const audioUrl = URL.createObjectURL(blob);
+  let res = await playMusic(audioUrl);
+  URL.revokeObjectURL(audioUrl);
+  return res;
+}
+async function playShuffledAudio() {
+  while (true) {
+    const music = await audioStore.getAll();
+    const shuffledMusic = music.sort(() => Math.random() - 0.5);
+    if (shuffledMusic.length === 0) return;
+    for (const m of shuffledMusic) {
+      let res = await playAudioAsMusic(m);
+      if (res === AUDIO_ABORTED) return;
+      await new Promise((resolve) => setTimeout(resolve, 1e3));
+    }
+  }
 }
 
 // src/state.ts
@@ -403,14 +614,6 @@ function isLeader() {
   return appState.tabId === appState.leader;
 }
 
-// src/types.ts
-var TASK_SESSION = 0;
-var TASK_RECURRING = 2;
-var TASK_COMPLETED = 3;
-var APP_IDLE = 0;
-var APP_ACTIVE = 1;
-var APP_BREAK = 2;
-
 // src/events.ts
 var callback = {
   onChange: () => {
@@ -468,7 +671,7 @@ async function flipCountDirection() {
 async function startSession() {
   appState.leader = appState.tabId;
   appState.status = APP_ACTIVE;
-  appState.sessionId = getId();
+  appState.sessionId = getTaskId();
   appState.checkpoint = Date.now();
   callback.onChange();
   await writeToLocalStorage();
@@ -501,7 +704,7 @@ window.addEventListener("beforeunload", async function(event) {
   }
 });
 async function storeTask(config) {
-  config.id = getId();
+  config.id = getTaskId();
   if (!config.fridx) {
     let lastTask;
     if (config.status === TASK_SESSION) lastTask = sessionTasks.list[sessionTasks.list.length - 1];
@@ -694,54 +897,6 @@ var dom = tags.reduce((acc, tag) => {
   return acc;
 }, {});
 
-// src/audio.ts
-var AudioPlayer = class {
-  constructor() {
-    __publicField(this, "audio", null);
-    __publicField(this, "currentResolver", null);
-  }
-  play(audioUrl) {
-    this.stop();
-    return new Promise((resolve, reject) => {
-      this.currentResolver = resolve;
-      this.audio = new Audio(audioUrl);
-      this.audio.addEventListener("ended", () => {
-        var _a;
-        (_a = this.currentResolver) == null ? void 0 : _a.call(this);
-        this.currentResolver = null;
-        this.audio = null;
-      });
-      this.audio.play().catch((error) => {
-        reject(error);
-        this.currentResolver = null;
-        this.audio = null;
-      });
-    });
-  }
-  stop() {
-    var _a;
-    if (this.audio) {
-      this.audio.pause();
-      this.audio.currentTime = 0;
-      (_a = this.currentResolver) == null ? void 0 : _a.call(this);
-      this.currentResolver = null;
-      this.audio = null;
-    }
-  }
-  setVolume(volume) {
-    if (this.audio) {
-      this.audio.volume = volume;
-    }
-  }
-};
-var speechPlayer = new AudioPlayer();
-var musicPlayer = new AudioPlayer();
-async function playSpeech(audioUrl) {
-  musicPlayer.setVolume(0.5);
-  await speechPlayer.play(audioUrl);
-  musicPlayer.setVolume(1);
-}
-
 // src/index.ts
 var { div, h1, button, p, input, span } = dom;
 var DEFAULT_TASK_TIME = 25 * 60;
@@ -762,6 +917,18 @@ var styles = {
     borderBottom: "2px solid var(--accent)"
   }
 };
+function uploadFiles(callback2) {
+  return (event) => {
+    event.preventDefault();
+    const files = [];
+    if (event instanceof DragEvent && event.dataTransfer) {
+      files.push(...Array.from(event.dataTransfer.files));
+    } else if (event.target instanceof HTMLInputElement && event.target.files) {
+      files.push(...Array.from(event.target.files));
+    }
+    return callback2(files);
+  };
+}
 function parseHumanReadableTime(hrTime) {
   try {
     let timeStr = hrTime.trim().toLowerCase();
@@ -1043,7 +1210,6 @@ function completedTasksView({ completedTasks: completedTasks2 }, { collapsed = t
 function sessionButton({ onclick, label }) {
   return button({ onclick }, label);
 }
-var TWO_MINUTES = 4.9 * 60;
 function pomodoroTimer({ checkpoint, countup, pomodoroDuration, breakDuration, status, speaker }, { renderSignal = 0, prevTimeRemaining = 0 }, update) {
   let now = Date.now();
   let negative = false;
@@ -1083,16 +1249,36 @@ function pomodoroTimer({ checkpoint, countup, pomodoroDuration, breakDuration, s
     span({ className }, label)
   );
 }
+var audioUploadView = (props) => {
+  return div(
+    { className: "audio-controls" },
+    h("label", { for: "audio-upload" }, "Upload Audio"),
+    input({
+      id: "audio-upload",
+      type: "file",
+      multiple: true,
+      accept: "audio/*",
+      onchange: uploadFiles((files) => handleAudioUpload(files))
+    })
+  );
+};
 function ui(props) {
   console.log("ui", appState.tabs);
   if (props.status === APP_IDLE || props.sessionTasks.list.length === 0) {
     return div(
       { className: "tasks-bar" },
       // props.tabs.map((tab) => p({}, tab)),
-      h(sessionButton, { onclick: startSession, label: "Start Session" }),
+      h(sessionButton, {
+        onclick: () => {
+          playShuffledAudio();
+          startSession();
+        },
+        label: "Start Session"
+      }),
       h(sessionTasksView, { key: "session", ...props }),
       h(recurringTasksView, { key: "recurring", ...props }),
-      h(completedTasksView, { key: "completed", ...props })
+      h(completedTasksView, { key: "completed", ...props }),
+      h(audioUploadView, {})
     );
   } else {
     return div(
@@ -1102,9 +1288,27 @@ function ui(props) {
       // pomodoro timer
       h(pomodoroTimer, props),
       // buttons
-      props.status === APP_ACTIVE ? h(sessionButton, { onclick: pauseSession, label: "Take Break" }) : h(sessionButton, { onclick: startSession, label: "Resume" }),
+      props.status === APP_ACTIVE ? h(sessionButton, {
+        onclick: () => {
+          stopMusic();
+          pauseSession();
+        },
+        label: "Take Break"
+      }) : h(sessionButton, {
+        onclick: () => {
+          playShuffledAudio();
+          startSession();
+        },
+        label: "Resume"
+      }),
       span({}, " "),
-      h(sessionButton, { onclick: endSession, label: "End Session" }),
+      h(sessionButton, {
+        onclick: () => {
+          stopMusic();
+          endSession();
+        },
+        label: "End Session"
+      }),
       // active task
       h(activeTaskView, { key: "active", activeTask: props.sessionTasks.list[0] }),
       // task lists
@@ -1114,7 +1318,8 @@ function ui(props) {
         sessionTasks: { list: props.sessionTasks.list.slice(1) }
       }),
       h(recurringTasksView, { key: "recurring", ...props }),
-      h(completedTasksView, { key: "completed", ...props })
+      h(completedTasksView, { key: "completed", ...props }),
+      h(audioUploadView, {})
     );
   }
 }

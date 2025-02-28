@@ -134,10 +134,39 @@
         position: absolute;
         left: -1rem;
       }
+
+      .audio-controls {
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        background: var(--bg-task);
+        padding: 1rem;
+        display: flex;
+        gap: 1rem;
+        align-items: center;
+        border-top: 1px solid var(--border);
+      }
+
+      .audio-controls input[type='file'] {
+        display: none;
+      }
+
+      .audio-controls label {
+        background-color: var(--accent);
+        color: white;
+        padding: 0.5rem 1rem;
+        cursor: pointer;
+      }
     </style>
   </head>
   <body>
     <div id="app"></div>
+    <!-- <div class="audio-controls">
+      <label for="audio-upload">Upload Audio</label>
+      <input type="file" id="audio-upload" accept="audio/*" multiple />
+      <button id="play-audio">Play Random</button>
+    </div> -->
     <script src="dist/index.js" />
   </body>
 </html>

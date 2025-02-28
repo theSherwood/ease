@@ -1,5 +1,6 @@
 import { generateKeyBetween } from './fridx';
 import { setupStore } from './storage';
+import { handleAudioUpload, playShuffledAudio } from './music';
 import {
   createTask,
   deleteTask,
@@ -28,7 +29,7 @@ import {
   APP_BREAK,
 } from './types';
 import { appState, isLeader } from './state';
-import { playSpeech } from './audio';
+import { playSpeech, stopMusic } from './audioPlayer';
 const { div, h1, button, p, input, span } = dom;
 
 const DEFAULT_TASK_TIME = 25 * 60;
@@ -52,6 +53,19 @@ let styles = {
     borderBottom: '2px solid var(--accent)',
   },
 };
+
+function uploadFiles(callback: (files: File[]) => void) {
+  return (event: Event) => {
+    event.preventDefault();
+    const files: File[] = [];
+    if (event instanceof DragEvent && event.dataTransfer) {
+      files.push(...Array.from(event.dataTransfer.files));
+    } else if (event.target instanceof HTMLInputElement && event.target.files) {
+      files.push(...Array.from(event.target.files));
+    }
+    return callback(files);
+  };
+}
 
 /**
  * 1h 30m => 90 * 60
@@ -373,8 +387,6 @@ function sessionButton({ onclick, label }: { onclick: () => void; label: string 
   return button({ onclick }, label);
 }
 
-const TWO_MINUTES = 4.9 * 60;
-
 function pomodoroTimer(
   { checkpoint, countup, pomodoroDuration, breakDuration, status, speaker }: AppState,
   { renderSignal = 0, prevTimeRemaining = 0 },
@@ -429,16 +441,37 @@ function pomodoroTimer(
   );
 }
 
+const audioUploadView = (props: {}) => {
+  return div(
+    { className: 'audio-controls' },
+    h('label', { for: 'audio-upload' }, 'Upload Audio'),
+    input({
+      id: 'audio-upload',
+      type: 'file',
+      multiple: true,
+      accept: 'audio/*',
+      onchange: uploadFiles((files) => handleAudioUpload(files)),
+    }),
+  );
+};
+
 function ui(props: AppState) {
   console.log('ui', appState.tabs);
   if (props.status === APP_IDLE || props.sessionTasks.list.length === 0) {
     return div(
       { className: 'tasks-bar' },
       // props.tabs.map((tab) => p({}, tab)),
-      h(sessionButton, { onclick: startSession, label: 'Start Session' }),
+      h(sessionButton, {
+        onclick: () => {
+          playShuffledAudio();
+          startSession();
+        },
+        label: 'Start Session',
+      }),
       h(sessionTasksView, { key: 'session', ...props }),
       h(recurringTasksView, { key: 'recurring', ...props }),
       h(completedTasksView, { key: 'completed', ...props }),
+      h(audioUploadView, {}),
     );
   } else {
     return div(
@@ -449,10 +482,28 @@ function ui(props: AppState) {
       h(pomodoroTimer, props),
       // buttons
       props.status === APP_ACTIVE
-        ? h(sessionButton, { onclick: pauseSession, label: 'Take Break' })
-        : h(sessionButton, { onclick: startSession, label: 'Resume' }),
+        ? h(sessionButton, {
+            onclick: () => {
+              stopMusic();
+              pauseSession();
+            },
+            label: 'Take Break',
+          })
+        : h(sessionButton, {
+            onclick: () => {
+              playShuffledAudio();
+              startSession();
+            },
+            label: 'Resume',
+          }),
       span({}, ' '),
-      h(sessionButton, { onclick: endSession, label: 'End Session' }),
+      h(sessionButton, {
+        onclick: () => {
+          stopMusic();
+          endSession();
+        },
+        label: 'End Session',
+      }),
       // active task
       h(activeTaskView, { key: 'active', activeTask: props.sessionTasks.list[0] }),
       // task lists
@@ -463,6 +514,7 @@ function ui(props: AppState) {
       }),
       h(recurringTasksView, { key: 'recurring', ...props }),
       h(completedTasksView, { key: 'completed', ...props }),
+      h(audioUploadView, {}),
     );
   }
 }

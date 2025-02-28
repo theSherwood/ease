@@ -22,6 +22,18 @@ export type Task = {
 
 export type TaskList = { list: Task[] };
 
+export type Audio = {
+  id: number;
+  name: string;
+  data: Blob;
+  type: string;
+  lastModified: number;
+};
+
+export const AUDIO_FINISHED = 0;
+export const AUDIO_ABORTED = 1;
+export type AudioEndKind = typeof AUDIO_FINISHED | typeof AUDIO_ABORTED;
+
 export const SESSION_ACTIVE = 0;
 export const SESSION_PAUSED = 1;
 
