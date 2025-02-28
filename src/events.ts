@@ -4,10 +4,11 @@ import {
   completedTasks,
   readFromLocalStorage,
   recurringTasks,
+  SESSION_ID_DEFAULT,
   sessionTasks,
   writeToLocalStorage,
 } from './state';
-import { getTaskId, taskStore } from './storage';
+import { getSessionId, getTaskId, sessionSegmentStore, taskStore } from './storage';
 import {
   TASK_COMPLETED,
   TASK_SESSION,
@@ -101,28 +102,59 @@ export async function flipCountDirection() {
 export async function startSession() {
   appState.leader = appState.tabId;
   appState.status = APP_ACTIVE;
-  appState.sessionId = getTaskId(); // TODO
+  appState.sessionId = getSessionId();
   appState.checkpoint = Date.now();
   callback.onChange();
   await writeToLocalStorage();
   postMessage({ type: 'sessionChange', id: 0 });
 }
-export async function pauseSession() {
+export async function breakSession() {
+  const checkpoint = appState.checkpoint;
+  const status = appState.status;
   appState.leader = appState.tabId;
   appState.status = APP_BREAK;
   appState.checkpoint = Date.now();
   callback.onChange();
   await writeToLocalStorage();
   postMessage({ type: 'sessionChange', id: 0 });
+  await sessionSegmentStore.add({
+    sessionId: appState.sessionId,
+    kind: status === APP_ACTIVE ? APP_ACTIVE : APP_BREAK,
+    start: checkpoint,
+    end: appState.checkpoint,
+  });
+}
+export async function resumeSession() {
+  const checkpoint = appState.checkpoint;
+  appState.leader = appState.tabId;
+  appState.status = APP_ACTIVE;
+  appState.checkpoint = Date.now();
+  callback.onChange();
+  await writeToLocalStorage();
+  postMessage({ type: 'sessionChange', id: 0 });
+  await sessionSegmentStore.add({
+    sessionId: appState.sessionId,
+    kind: APP_BREAK,
+    start: checkpoint,
+    end: appState.checkpoint,
+  });
 }
 export async function endSession() {
+  const checkpoint = appState.checkpoint;
+  const sessionId = appState.sessionId;
   appState.leader = appState.tabId;
   appState.status = APP_IDLE;
-  appState.sessionId = 0;
+  appState.sessionId = SESSION_ID_DEFAULT;
   appState.checkpoint = 0;
   callback.onChange();
   await writeToLocalStorage();
   postMessage({ type: 'sessionChange', id: 0 });
+  await sessionSegmentStore.add({
+    sessionId: sessionId,
+    kind: APP_ACTIVE,
+    start: checkpoint,
+    end: Date.now(),
+  });
 }
 
 window.addEventListener('beforeunload', async function (event) {
@@ -130,7 +162,6 @@ window.addEventListener('beforeunload', async function (event) {
   postMessage({ type: 'goodbye', id: 0, tabId: tabs.filter((t) => t !== appState.tabId)[0] });
   if (appState.status !== APP_IDLE && tabs.length === 1) {
     console.log('Session is active.');
-    event.preventDefault();
     endSession();
   }
 });

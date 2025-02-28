@@ -34,13 +34,10 @@ export const AUDIO_FINISHED = 0;
 export const AUDIO_ABORTED = 1;
 export type AudioEndKind = typeof AUDIO_FINISHED | typeof AUDIO_ABORTED;
 
-export const SESSION_ACTIVE = 0;
-export const SESSION_PAUSED = 1;
-
-export type SessionKind = typeof SESSION_ACTIVE | typeof SESSION_PAUSED;
+export type SessionKind = typeof APP_ACTIVE | typeof APP_BREAK;
 
 export type SessionSegment = {
-  id: number;
+  id?: number;
   sessionId: number;
   kind: SessionKind;
   start: number;
@@ -57,8 +54,6 @@ export type AppState = {
   tabId: string;
   tabs: string[];
   leader: string;
-
-  activeUtterance: SpeechSynthesisUtterance | null;
 
   status: AppStatus;
   sessionId: number;

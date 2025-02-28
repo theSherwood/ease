@@ -8,22 +8,17 @@ const TASKS_STORE = 'tasks';
 const AUDIO_STORE = 'audio';
 const SESSION_SEGMENTS_STORE = 'sessionSegments';
 
-let maxSessionId = 0;
-export function getSessionId() {
-  return ++maxSessionId;
-}
-
 let maxTaskId = 0;
 let maxAudioId = 0;
-let maxSessionSegmentId = 0;
+let maxSessionId = 0;
 export function getTaskId() {
   return ++maxTaskId;
 }
 export function getAudioId() {
   return ++maxAudioId;
 }
-export function getSessionSegmentId() {
-  return ++maxSessionSegmentId;
+export function getSessionId() {
+  return ++maxSessionId;
 }
 
 export function getColumnMax(db: IDBDatabase, storeName: string, column: string): Promise<number> {
@@ -36,7 +31,7 @@ export function getColumnMax(db: IDBDatabase, storeName: string, column: string)
       console.warn(e);
       resolve(0);
     }
-    let index = store.index('myColumn');
+    let index = store.index(column);
     // Use the .openCursor() method with descending order on the primary key
     const request = index.openCursor(null, 'prev');
     request.onsuccess = (event) => {
@@ -48,30 +43,6 @@ export function getColumnMax(db: IDBDatabase, storeName: string, column: string)
       }
     };
     request.onerror = () => reject(`Error retrieving max "${column}"`);
-  });
-}
-
-export function getMaxIdForStore(db: IDBDatabase, storeName: string): Promise<number> {
-  return new Promise((resolve, reject) => {
-    let store;
-    try {
-      const transaction = db.transaction(storeName, 'readonly');
-      store = transaction.objectStore(storeName);
-    } catch (e) {
-      console.warn(e);
-      resolve(0);
-    }
-    // Use the .openCursor() method with descending order on the primary key
-    const request = store.openCursor(null, 'prev');
-    request.onsuccess = (event) => {
-      const cursor = event.target.result;
-      if (cursor) {
-        resolve(cursor.key); // Max ID
-      } else {
-        resolve(0); // No records found
-      }
-    };
-    request.onerror = () => reject('Error retrieving max ID');
   });
 }
 
@@ -93,8 +64,6 @@ export class ListStore<T extends HasId> {
   async add(record: T): Promise<void> {
     const db = this.db!;
     return new Promise((resolve, reject) => {
-      console.log('add', this.storeName, record, db);
-      console.log('Object Stores:', Array.from(db.objectStoreNames));
       const tx = db.transaction(this.storeName, 'readwrite');
       const store = tx.objectStore(this.storeName);
       store.add(record);
@@ -193,7 +162,7 @@ const options = {
 
 export async function setupStore() {
   let db: IDBDatabase;
-  const p = new Promise((resolve, reject) => {
+  const setupDb = new Promise((resolve, reject) => {
     const request = indexedDB.open(EASE_STORE, DB_VERSION);
 
     request.onerror = () => reject(request.error);
@@ -217,21 +186,21 @@ export async function setupStore() {
       }
     };
   });
-  await p;
+  await setupDb;
 
   taskStore.connect(db!);
   audioStore.connect(db!);
   sessionSegmentStore.connect(db!);
   console.log('Object Stores:', Array.from(db!.objectStoreNames));
 
-  let id = await getMaxIdForStore(taskStore.db!, 'tasks');
+  let id = await getColumnMax(taskStore.db!, 'tasks', 'id');
   if (id > maxTaskId) maxTaskId = id;
-  id = await getMaxIdForStore(audioStore.db!, 'audio');
+  id = await getColumnMax(audioStore.db!, 'audio', 'id');
   if (id > maxAudioId) maxAudioId = id;
-  id = await getMaxIdForStore(sessionSegmentStore.db!, 'sessionSegments');
-  if (id > maxSessionSegmentId) maxSessionSegmentId = id;
+  id = await getColumnMax(sessionSegmentStore.db!, 'sessionSegments', 'sessionId');
+  if (id > maxSessionId) maxSessionId = id;
 
   console.log('maxTaskId', maxTaskId);
   console.log('maxAudioId', maxAudioId);
-  console.log('maxSessionId', maxSessionId);
+  console.log('maxSessionSegmentId', maxSessionId);
 }

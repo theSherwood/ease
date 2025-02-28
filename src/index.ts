@@ -11,9 +11,10 @@ import {
   callback,
   startSession,
   endSession,
-  pauseSession,
+  breakSession,
   rollcall,
   flipCountDirection,
+  resumeSession,
 } from './events';
 import { render, diff, h, dom, DNode } from './vdom';
 import {
@@ -485,14 +486,14 @@ function ui(props: AppState) {
         ? h(sessionButton, {
             onclick: () => {
               stopMusic();
-              pauseSession();
+              breakSession();
             },
             label: 'Take Break',
           })
         : h(sessionButton, {
             onclick: () => {
               playShuffledAudio();
-              startSession();
+              resumeSession();
             },
             label: 'Resume',
           }),

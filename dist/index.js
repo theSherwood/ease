@@ -184,17 +184,19 @@ var EASE_STORE = "ease_store";
 var TASKS_STORE = "tasks";
 var AUDIO_STORE = "audio";
 var SESSION_SEGMENTS_STORE = "sessionSegments";
-var maxSessionId = 0;
 var maxTaskId = 0;
 var maxAudioId = 0;
-var maxSessionSegmentId = 0;
+var maxSessionId = 0;
 function getTaskId() {
   return ++maxTaskId;
 }
 function getAudioId() {
   return ++maxAudioId;
 }
-function getMaxIdForStore(db, storeName) {
+function getSessionId() {
+  return ++maxSessionId;
+}
+function getColumnMax(db, storeName, column) {
   return new Promise((resolve, reject) => {
     let store;
     try {
@@ -204,16 +206,17 @@ function getMaxIdForStore(db, storeName) {
       console.warn(e);
       resolve(0);
     }
-    const request = store.openCursor(null, "prev");
+    let index = store.index(column);
+    const request = index.openCursor(null, "prev");
     request.onsuccess = (event) => {
       const cursor = event.target.result;
       if (cursor) {
-        resolve(cursor.key);
+        resolve(cursor.value[column]);
       } else {
         resolve(0);
       }
     };
-    request.onerror = () => reject("Error retrieving max ID");
+    request.onerror = () => reject(`Error retrieving max "${column}"`);
   });
 }
 var ListStore = class {
@@ -228,8 +231,6 @@ var ListStore = class {
   async add(record) {
     const db = this.db;
     return new Promise((resolve, reject) => {
-      console.log("add", this.storeName, record, db);
-      console.log("Object Stores:", Array.from(db.objectStoreNames));
       const tx = db.transaction(this.storeName, "readwrite");
       const store = tx.objectStore(this.storeName);
       store.add(record);
@@ -316,7 +317,7 @@ var options = {
 };
 async function setupStore() {
   let db;
-  const p2 = new Promise((resolve, reject) => {
+  const setupDb = new Promise((resolve, reject) => {
     const request = indexedDB.open(EASE_STORE, DB_VERSION);
     request.onerror = () => reject(request.error);
     request.onsuccess = () => {
@@ -338,20 +339,20 @@ async function setupStore() {
       }
     };
   });
-  await p2;
+  await setupDb;
   taskStore.connect(db);
   audioStore.connect(db);
   sessionSegmentStore.connect(db);
   console.log("Object Stores:", Array.from(db.objectStoreNames));
-  let id = await getMaxIdForStore(taskStore.db, "tasks");
+  let id = await getColumnMax(taskStore.db, "tasks", "id");
   if (id > maxTaskId) maxTaskId = id;
-  id = await getMaxIdForStore(audioStore.db, "audio");
+  id = await getColumnMax(audioStore.db, "audio", "id");
   if (id > maxAudioId) maxAudioId = id;
-  id = await getMaxIdForStore(sessionSegmentStore.db, "sessionSegments");
-  if (id > maxSessionSegmentId) maxSessionSegmentId = id;
+  id = await getColumnMax(sessionSegmentStore.db, "sessionSegments", "sessionId");
+  if (id > maxSessionId) maxSessionId = id;
   console.log("maxTaskId", maxTaskId);
   console.log("maxAudioId", maxAudioId);
-  console.log("maxSessionId", maxSessionId);
+  console.log("maxSessionSegmentId", maxSessionId);
 }
 
 // src/types.ts
@@ -555,6 +556,7 @@ var POMODORO_DURATION_DEFAULT = 5;
 var BREAK_DURATION_DEFAULT = 5;
 var COUNTUP_DEFAULT = false;
 var SPEAKER_DEFAULT = "rick_sanchez";
+var SESSION_ID_DEFAULT = -1;
 var sessionTasks = { list: [] };
 var recurringTasks = { list: [] };
 var completedTasks = { list: [] };
@@ -565,13 +567,12 @@ var appState = {
   tabId,
   tabs: [tabId],
   leader: "",
-  activeUtterance: null,
   // Stored in localStorage
   status: 0,
-  sessionId: 0,
   checkpoint: 0,
   pomodoroDuration: 0,
   breakDuration: 0,
+  sessionId: SESSION_ID_DEFAULT,
   countup: false,
   speaker: "",
   // Task data
@@ -587,7 +588,7 @@ function boolFromString(value, defaultBool = true) {
 }
 function readFromLocalStorageUnsafe() {
   appState.status = Number(localStorage.getItem("appStatus"));
-  appState.sessionId = Number(localStorage.getItem("sessionId")) || 0;
+  appState.sessionId = Number(localStorage.getItem("sessionId")) || SESSION_ID_DEFAULT;
   appState.checkpoint = Number(localStorage.getItem("checkpoint")) || 0;
   appState.pomodoroDuration = Number(localStorage.getItem("pomodoroDefault")) || POMODORO_DURATION_DEFAULT;
   appState.breakDuration = Number(localStorage.getItem("breakDefault")) || BREAK_DURATION_DEFAULT;
@@ -671,35 +672,65 @@ async function flipCountDirection() {
 async function startSession() {
   appState.leader = appState.tabId;
   appState.status = APP_ACTIVE;
-  appState.sessionId = getTaskId();
+  appState.sessionId = getSessionId();
   appState.checkpoint = Date.now();
   callback.onChange();
   await writeToLocalStorage();
   postMessage({ type: "sessionChange", id: 0 });
 }
-async function pauseSession() {
+async function breakSession() {
+  const checkpoint = appState.checkpoint;
+  const status = appState.status;
   appState.leader = appState.tabId;
   appState.status = APP_BREAK;
   appState.checkpoint = Date.now();
   callback.onChange();
   await writeToLocalStorage();
   postMessage({ type: "sessionChange", id: 0 });
+  await sessionSegmentStore.add({
+    sessionId: appState.sessionId,
+    kind: status === APP_ACTIVE ? APP_ACTIVE : APP_BREAK,
+    start: checkpoint,
+    end: appState.checkpoint
+  });
+}
+async function resumeSession() {
+  const checkpoint = appState.checkpoint;
+  appState.leader = appState.tabId;
+  appState.status = APP_ACTIVE;
+  appState.checkpoint = Date.now();
+  callback.onChange();
+  await writeToLocalStorage();
+  postMessage({ type: "sessionChange", id: 0 });
+  await sessionSegmentStore.add({
+    sessionId: appState.sessionId,
+    kind: APP_BREAK,
+    start: checkpoint,
+    end: appState.checkpoint
+  });
 }
 async function endSession() {
+  const checkpoint = appState.checkpoint;
+  const sessionId = appState.sessionId;
   appState.leader = appState.tabId;
   appState.status = APP_IDLE;
-  appState.sessionId = 0;
+  appState.sessionId = SESSION_ID_DEFAULT;
   appState.checkpoint = 0;
   callback.onChange();
   await writeToLocalStorage();
   postMessage({ type: "sessionChange", id: 0 });
+  await sessionSegmentStore.add({
+    sessionId,
+    kind: APP_ACTIVE,
+    start: checkpoint,
+    end: Date.now()
+  });
 }
 window.addEventListener("beforeunload", async function(event) {
   let tabs = appState.tabs;
   postMessage({ type: "goodbye", id: 0, tabId: tabs.filter((t) => t !== appState.tabId)[0] });
   if (appState.status !== APP_IDLE && tabs.length === 1) {
     console.log("Session is active.");
-    event.preventDefault();
     endSession();
   }
 });
@@ -1291,13 +1322,13 @@ function ui(props) {
       props.status === APP_ACTIVE ? h(sessionButton, {
         onclick: () => {
           stopMusic();
-          pauseSession();
+          breakSession();
         },
         label: "Take Break"
       }) : h(sessionButton, {
         onclick: () => {
           playShuffledAudio();
-          startSession();
+          resumeSession();
         },
         label: "Resume"
       }),

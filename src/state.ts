@@ -7,6 +7,7 @@ const BREAK_DURATION_DEFAULT = 5;
 const COUNTUP_DEFAULT = false;
 // const SPEAKER_DEFAULT = 'johnny_cash';
 const SPEAKER_DEFAULT = 'rick_sanchez';
+export const SESSION_ID_DEFAULT = -1;
 
 export const sessionTasks: TaskList = { list: [] };
 export const recurringTasks: TaskList = { list: [] };
@@ -21,14 +22,12 @@ export const appState: AppState = {
   tabs: [tabId],
   leader: '',
 
-  activeUtterance: null,
-
   // Stored in localStorage
   status: 0,
-  sessionId: 0,
   checkpoint: 0,
   pomodoroDuration: 0,
   breakDuration: 0,
+  sessionId: SESSION_ID_DEFAULT,
   countup: false,
   speaker: '',
 
@@ -47,7 +46,7 @@ function boolFromString(value: string | null, defaultBool = true): boolean {
 
 function readFromLocalStorageUnsafe() {
   appState.status = Number(localStorage.getItem('appStatus')) as AppStatus;
-  appState.sessionId = Number(localStorage.getItem('sessionId')) || 0;
+  appState.sessionId = Number(localStorage.getItem('sessionId')) || SESSION_ID_DEFAULT;
   appState.checkpoint = Number(localStorage.getItem('checkpoint')) || 0;
   appState.pomodoroDuration =
     Number(localStorage.getItem('pomodoroDefault')) || POMODORO_DURATION_DEFAULT;
