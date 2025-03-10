@@ -707,8 +707,6 @@ channel.addEventListener("message", async (e) => {
     if (task !== null) addTaskToLists(task);
     callback.onChange();
   }
-  if (data.type === "resetAudio") {
-  }
 });
 function rollcall() {
   appState.tabs = [appState.tabId];
@@ -1004,7 +1002,7 @@ async function handleAudioUpload(files) {
       appState.audioUploadState += portion;
       redraw();
     }
-    appState.audioUploadState = 1.1;
+    appState.audioUploadState = 1.01;
     redraw();
   } catch (e) {
     console.error(e);
@@ -1394,7 +1392,7 @@ var audioUploadView = (props) => {
       {
         className: "audio-controls"
       },
-      progress({ value: props.audioUploadState, max: 1 })
+      div({ className: "progress", style: { width: props.audioUploadState * 100 + "%" } })
     );
   }
 };

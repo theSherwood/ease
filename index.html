@@ -148,16 +148,10 @@
         border-top: 1px solid var(--border);
       }
 
-      .audio-controls progress {
-        width: 100%;
+      .audio-controls .progress {
         height: 100%;
-        background-color: transparent;
-      }
-      .audio-controls progress::-webkit-progress-value {
-        background-color: var(--accent) !important;
-      }
-      progress::-webkit-progress-bar {
-        background-color: transparent;
+        background-color: var(--accent);
+        transition: width 0.2s ease-in-out;
       }
 
       .audio-controls input[type='file'] {

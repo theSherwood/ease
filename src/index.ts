@@ -63,7 +63,7 @@ async function handleAudioUpload(files: File[]) {
       appState.audioUploadState += portion;
       redraw();
     }
-    appState.audioUploadState = 1.1;
+    appState.audioUploadState = 1.01;
     redraw();
   } catch (e) {
     console.error(e);
@@ -511,7 +511,7 @@ const audioUploadView = (props: AppState) => {
       {
         className: 'audio-controls',
       },
-      progress({ value: props.audioUploadState, max: 1 }),
+      div({ className: 'progress', style: { width: props.audioUploadState * 100 + '%' } }),
     );
   }
 };

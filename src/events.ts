@@ -33,7 +33,6 @@ type MessageTypes =
   | 'rollcallRespond'
   | 'goodbye'
   | 'updateTask'
-  | 'resetAudio'
   | 'sessionChange';
 type MessageData = {
   type: MessageTypes;
@@ -79,9 +78,6 @@ channel.addEventListener('message', async (e) => {
     const task = await taskStore.get(data.id);
     if (task !== null) addTaskToLists(task);
     callback.onChange();
-  }
-  if (data.type === 'resetAudio') {
-    // TODO
   }
 });
 
