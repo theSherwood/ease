@@ -31,6 +31,9 @@ export const appState: AppState = {
   countup: false,
   speaker: '',
 
+  // Local state
+  audioUploadState: 1,
+
   // Task data
   sessionTasks,
   recurringTasks,

@@ -85,6 +85,17 @@ export class ListStore<T extends HasId> {
     });
   }
 
+  async upsert(record: Partial<T>): Promise<void> {
+    const db = this.db!;
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(this.storeName, 'readwrite');
+      const store = tx.objectStore(this.storeName);
+      store.put(record);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+
   async get(id: number): Promise<T | null> {
     const db = this.db!;
     return new Promise((resolve, reject) => {
@@ -119,12 +130,12 @@ export class ListStore<T extends HasId> {
     });
   }
 
-  async upsert(record: Partial<T>): Promise<void> {
+  async clear(): Promise<void> {
     const db = this.db!;
     return new Promise((resolve, reject) => {
       const tx = db.transaction(this.storeName, 'readwrite');
       const store = tx.objectStore(this.storeName);
-      store.put(record);
+      store.clear();
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
     });

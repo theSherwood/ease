@@ -171,7 +171,7 @@ function removePatchedChildren(child) {
   }
 }
 
-const tags = ['div', 'h1', 'button', 'p', 'input', 'span'] as const;
+const tags = ['div', 'h1', 'button', 'p', 'input', 'span', 'progress'] as const;
 export const dom = tags.reduce((acc, tag) => {
   acc[tag] = (props, ...children) => h(tag, props, ...children);
   return acc;

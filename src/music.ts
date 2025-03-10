@@ -2,7 +2,7 @@ import { playMusic } from './audioPlayer';
 import { audioStore, getAudioId } from './storage';
 import { Audio, AUDIO_ABORTED } from './types';
 
-type ProcessOptions = {
+export type ProcessOptions = {
   normalize?: boolean;
   trim?: boolean;
   fadeIn?: number;
@@ -135,18 +135,6 @@ export async function storeAudio(config: Audio) {
   await audioStore.add(config);
 }
 
-export async function handleAudioUpload(files: File[]) {
-  const options: ProcessOptions = {
-    normalize: true,
-    fadeIn: 0.01,
-    fadeOut: 0.01,
-  };
-  for (const file of files) {
-    const processedAudio = await processAudioFile(file, options);
-    await storeAudio(processedAudio);
-  }
-}
-
 async function playAudioAsMusic(audio: Audio) {
   // Create blob URL from stored data
   const blob = new Blob([audio.data], { type: audio.type });
@@ -167,4 +155,62 @@ export async function playShuffledAudio() {
       await new Promise((resolve) => setTimeout(resolve, 1000));
     }
   }
+}
+
+export function uploadAudioFiles(callback: (files: File[]) => void) {
+  return async (event: Event) => {
+    event.preventDefault();
+    let files: File[] = [];
+    if (event instanceof DragEvent && event.dataTransfer) {
+      files = await extractAudioFiles(event.dataTransfer.items);
+    } else if (event.target instanceof HTMLInputElement && event.target.files) {
+      files = await extractAudioFiles(event.target.files);
+    }
+    console.log('files', files);
+    return callback(files);
+  };
+}
+
+function isAudioFile(file: File): boolean {
+  return file.name.endsWith('.mp3') || file.name.endsWith('.wav');
+}
+
+async function extractAudioFiles(items: DataTransferItemList | FileList): Promise<File[]> {
+  let audioFiles: File[] = [];
+  if (items instanceof DataTransferItemList) {
+    for (const item of items) {
+      if (item.kind === 'file') {
+        const entry = item.webkitGetAsEntry();
+        if (entry) await traverseFileTree(entry, audioFiles);
+      }
+    }
+  } else if (items instanceof FileList) {
+    for (const item of items) {
+      if (isAudioFile(item)) audioFiles.push(item);
+    }
+  }
+  return audioFiles;
+}
+
+async function traverseFileTree(entry: FileSystemEntry, files: File[]) {
+  if (entry.isFile) {
+    const file = await getFile(entry as FileSystemFileEntry);
+    if (isAudioFile(file)) {
+      files.push(file);
+    }
+  } else if (entry.isDirectory) {
+    const reader = (entry as FileSystemDirectoryEntry).createReader();
+    let entries = await readEntries(reader);
+    for (const subEntry of entries) {
+      await traverseFileTree(subEntry, files);
+    }
+  }
+}
+
+function getFile(entry: FileSystemFileEntry): Promise<File> {
+  return new Promise((resolve) => entry.file(resolve));
+}
+
+function readEntries(reader: FileSystemDirectoryReader): Promise<FileSystemEntry[]> {
+  return new Promise((resolve) => reader.readEntries(resolve));
 }

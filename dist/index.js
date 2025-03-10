@@ -250,6 +250,16 @@ var ListStore = class {
       tx.onerror = () => reject(tx.error);
     });
   }
+  async upsert(record) {
+    const db = this.db;
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(this.storeName, "readwrite");
+      const store = tx.objectStore(this.storeName);
+      store.put(record);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  }
   async get(id) {
     const db = this.db;
     return new Promise((resolve, reject) => {
@@ -280,12 +290,12 @@ var ListStore = class {
       tx.onerror = () => reject(tx.error);
     });
   }
-  async upsert(record) {
+  async clear() {
     const db = this.db;
     return new Promise((resolve, reject) => {
       const tx = db.transaction(this.storeName, "readwrite");
       const store = tx.objectStore(this.storeName);
-      store.put(record);
+      store.clear();
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
     });
@@ -520,17 +530,6 @@ async function storeAudio(config) {
   config.id = getAudioId();
   await audioStore.add(config);
 }
-async function handleAudioUpload(files) {
-  const options2 = {
-    normalize: true,
-    fadeIn: 0.01,
-    fadeOut: 0.01
-  };
-  for (const file of files) {
-    const processedAudio = await processAudioFile(file, options2);
-    await storeAudio(processedAudio);
-  }
-}
 async function playAudioAsMusic(audio) {
   const blob = new Blob([audio.data], { type: audio.type });
   const audioUrl = URL.createObjectURL(blob);
@@ -549,6 +548,58 @@ async function playShuffledAudio() {
       await new Promise((resolve) => setTimeout(resolve, 1e3));
     }
   }
+}
+function uploadAudioFiles(callback2) {
+  return async (event) => {
+    event.preventDefault();
+    let files = [];
+    if (event instanceof DragEvent && event.dataTransfer) {
+      files = await extractAudioFiles(event.dataTransfer.items);
+    } else if (event.target instanceof HTMLInputElement && event.target.files) {
+      files = await extractAudioFiles(event.target.files);
+    }
+    console.log("files", files);
+    return callback2(files);
+  };
+}
+function isAudioFile(file) {
+  return file.name.endsWith(".mp3") || file.name.endsWith(".wav");
+}
+async function extractAudioFiles(items) {
+  let audioFiles = [];
+  if (items instanceof DataTransferItemList) {
+    for (const item of items) {
+      if (item.kind === "file") {
+        const entry = item.webkitGetAsEntry();
+        if (entry) await traverseFileTree(entry, audioFiles);
+      }
+    }
+  } else if (items instanceof FileList) {
+    for (const item of items) {
+      if (isAudioFile(item)) audioFiles.push(item);
+    }
+  }
+  return audioFiles;
+}
+async function traverseFileTree(entry, files) {
+  if (entry.isFile) {
+    const file = await getFile(entry);
+    if (isAudioFile(file)) {
+      files.push(file);
+    }
+  } else if (entry.isDirectory) {
+    const reader = entry.createReader();
+    let entries = await readEntries(reader);
+    for (const subEntry of entries) {
+      await traverseFileTree(subEntry, files);
+    }
+  }
+}
+function getFile(entry) {
+  return new Promise((resolve) => entry.file(resolve));
+}
+function readEntries(reader) {
+  return new Promise((resolve) => reader.readEntries(resolve));
 }
 
 // src/state.ts
@@ -575,6 +626,8 @@ var appState = {
   sessionId: SESSION_ID_DEFAULT,
   countup: false,
   speaker: "",
+  // Local state
+  audioUploadState: 1,
   // Task data
   sessionTasks,
   recurringTasks,
@@ -922,19 +975,44 @@ function removePatchedChildren(child) {
     _patched && removePatchedChildren(_patched);
   }
 }
-var tags = ["div", "h1", "button", "p", "input", "span"];
+var tags = ["div", "h1", "button", "p", "input", "span", "progress"];
 var dom = tags.reduce((acc, tag) => {
   acc[tag] = (props, ...children) => h(tag, props, ...children);
   return acc;
 }, {});
 
 // src/index.ts
-var { div, h1, button, p, input, span } = dom;
+var { div, h1, button, p, input, span, progress } = dom;
 var DEFAULT_TASK_TIME = 25 * 60;
 setupStore().then(() => {
   populateTasks();
 });
 rollcall();
+async function handleAudioUpload(files) {
+  const options2 = {
+    normalize: true,
+    fadeIn: 0.01,
+    fadeOut: 0.01
+  };
+  try {
+    appState.audioUploadState = 0;
+    redraw();
+    let portion = 1 / files.length;
+    for (const file of files) {
+      const processedAudio = await processAudioFile(file, options2);
+      await storeAudio(processedAudio);
+      appState.audioUploadState += portion;
+      redraw();
+    }
+    appState.audioUploadState = 1.1;
+    redraw();
+  } catch (e) {
+    console.error(e);
+  }
+  await new Promise((resolve) => setTimeout(resolve, 400));
+  appState.audioUploadState = 1;
+  redraw();
+}
 var styles = {
   task: {
     borderTop: "2px solid transparent",
@@ -948,18 +1026,6 @@ var styles = {
     borderBottom: "2px solid var(--accent)"
   }
 };
-function uploadFiles(callback2) {
-  return (event) => {
-    event.preventDefault();
-    const files = [];
-    if (event instanceof DragEvent && event.dataTransfer) {
-      files.push(...Array.from(event.dataTransfer.files));
-    } else if (event.target instanceof HTMLInputElement && event.target.files) {
-      files.push(...Array.from(event.target.files));
-    }
-    return callback2(files);
-  };
-}
 function parseHumanReadableTime(hrTime) {
   try {
     let timeStr = hrTime.trim().toLowerCase();
@@ -1280,18 +1346,57 @@ function pomodoroTimer({ checkpoint, countup, pomodoroDuration, breakDuration, s
     span({ className }, label)
   );
 }
+var audioDropHandlers = {
+  ondragover: (e) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+  },
+  ondragenter: (e) => {
+    e.preventDefault();
+  },
+  ondrop: (e) => {
+    e.dataTransfer.dropEffect = "copy";
+    e.preventDefault();
+    uploadAudioFiles((files) => handleAudioUpload(files))(e);
+  }
+};
 var audioUploadView = (props) => {
-  return div(
-    { className: "audio-controls" },
-    h("label", { for: "audio-upload" }, "Upload Audio"),
-    input({
-      id: "audio-upload",
-      type: "file",
-      multiple: true,
-      accept: "audio/*",
-      onchange: uploadFiles((files) => handleAudioUpload(files))
-    })
-  );
+  if (props.audioUploadState === 1) {
+    return div(
+      {
+        className: "audio-controls",
+        ...audioDropHandlers
+      },
+      h("label", { for: "audio-upload" }, "Upload Audio"),
+      input({
+        id: "audio-upload",
+        type: "file",
+        multiple: true,
+        accept: "audio/*",
+        onchange: (e) => {
+          console.log("change", e);
+          uploadAudioFiles((files) => handleAudioUpload(files))(e);
+        },
+        ...audioDropHandlers
+      }),
+      button(
+        {
+          onclick: () => {
+            audioStore.clear();
+          },
+          ...audioDropHandlers
+        },
+        "Delete Audio"
+      )
+    );
+  } else {
+    return div(
+      {
+        className: "audio-controls"
+      },
+      progress({ value: props.audioUploadState, max: 1 })
+    );
+  }
 };
 function ui(props) {
   console.log("ui", appState.tabs);
@@ -1309,13 +1414,12 @@ function ui(props) {
       h(sessionTasksView, { key: "session", ...props }),
       h(recurringTasksView, { key: "recurring", ...props }),
       h(completedTasksView, { key: "completed", ...props }),
-      h(audioUploadView, {})
+      h(audioUploadView, props)
     );
   } else {
     return div(
       { className: "tasks-bar" },
       div({}, isLeader() ? "Leader" : "Follower"),
-      // props.tabs.map((tab) => p({}, tab)),
       // pomodoro timer
       h(pomodoroTimer, props),
       // buttons
@@ -1350,7 +1454,7 @@ function ui(props) {
       }),
       h(recurringTasksView, { key: "recurring", ...props }),
       h(completedTasksView, { key: "completed", ...props }),
-      h(audioUploadView, {})
+      h(audioUploadView, props)
     );
   }
 }

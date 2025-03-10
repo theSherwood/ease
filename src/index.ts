@@ -1,6 +1,12 @@
 import { generateKeyBetween } from './fridx';
-import { setupStore } from './storage';
-import { handleAudioUpload, playShuffledAudio } from './music';
+import { audioStore, setupStore } from './storage';
+import {
+  uploadAudioFiles,
+  playShuffledAudio,
+  ProcessOptions,
+  storeAudio,
+  processAudioFile,
+} from './music';
 import {
   createTask,
   deleteTask,
@@ -31,7 +37,7 @@ import {
 } from './types';
 import { appState, isLeader } from './state';
 import { playSpeech, stopMusic } from './audioPlayer';
-const { div, h1, button, p, input, span } = dom;
+const { div, h1, button, p, input, span, progress } = dom;
 
 const DEFAULT_TASK_TIME = 25 * 60;
 
@@ -40,6 +46,32 @@ setupStore().then(() => {
 });
 
 rollcall();
+
+async function handleAudioUpload(files: File[]) {
+  const options: ProcessOptions = {
+    normalize: true,
+    fadeIn: 0.01,
+    fadeOut: 0.01,
+  };
+  try {
+    appState.audioUploadState = 0;
+    redraw();
+    let portion = 1 / files.length;
+    for (const file of files) {
+      const processedAudio = await processAudioFile(file, options);
+      await storeAudio(processedAudio);
+      appState.audioUploadState += portion;
+      redraw();
+    }
+    appState.audioUploadState = 1.1;
+    redraw();
+  } catch (e) {
+    console.error(e);
+  }
+  await new Promise((resolve) => setTimeout(resolve, 400));
+  appState.audioUploadState = 1;
+  redraw();
+}
 
 let styles = {
   task: {
@@ -54,19 +86,6 @@ let styles = {
     borderBottom: '2px solid var(--accent)',
   },
 };
-
-function uploadFiles(callback: (files: File[]) => void) {
-  return (event: Event) => {
-    event.preventDefault();
-    const files: File[] = [];
-    if (event instanceof DragEvent && event.dataTransfer) {
-      files.push(...Array.from(event.dataTransfer.files));
-    } else if (event.target instanceof HTMLInputElement && event.target.files) {
-      files.push(...Array.from(event.target.files));
-    }
-    return callback(files);
-  };
-}
 
 /**
  * 1h 30m => 90 * 60
@@ -442,18 +461,59 @@ function pomodoroTimer(
   );
 }
 
-const audioUploadView = (props: {}) => {
-  return div(
-    { className: 'audio-controls' },
-    h('label', { for: 'audio-upload' }, 'Upload Audio'),
-    input({
-      id: 'audio-upload',
-      type: 'file',
-      multiple: true,
-      accept: 'audio/*',
-      onchange: uploadFiles((files) => handleAudioUpload(files)),
-    }),
-  );
+const audioDropHandlers = {
+  ondragover: (e) => {
+    // Prevent default to allow drop
+    e.preventDefault();
+    e.dataTransfer!.dropEffect = 'copy';
+  },
+  ondragenter: (e) => {
+    e.preventDefault();
+  },
+  ondrop: (e: DragEvent) => {
+    e.dataTransfer!.dropEffect = 'copy';
+    e.preventDefault();
+    uploadAudioFiles((files) => handleAudioUpload(files))(e);
+  },
+};
+
+const audioUploadView = (props: AppState) => {
+  if (props.audioUploadState === 1) {
+    return div(
+      {
+        className: 'audio-controls',
+        ...audioDropHandlers,
+      },
+      h('label', { for: 'audio-upload' }, 'Upload Audio'),
+      input({
+        id: 'audio-upload',
+        type: 'file',
+        multiple: true,
+        accept: 'audio/*',
+        onchange: (e) => {
+          console.log('change', e);
+          uploadAudioFiles((files) => handleAudioUpload(files))(e);
+        },
+        ...audioDropHandlers,
+      }),
+      button(
+        {
+          onclick: () => {
+            audioStore.clear();
+          },
+          ...audioDropHandlers,
+        },
+        'Delete Audio',
+      ),
+    );
+  } else {
+    return div(
+      {
+        className: 'audio-controls',
+      },
+      progress({ value: props.audioUploadState, max: 1 }),
+    );
+  }
 };
 
 function ui(props: AppState) {
@@ -472,13 +532,12 @@ function ui(props: AppState) {
       h(sessionTasksView, { key: 'session', ...props }),
       h(recurringTasksView, { key: 'recurring', ...props }),
       h(completedTasksView, { key: 'completed', ...props }),
-      h(audioUploadView, {}),
+      h(audioUploadView, props),
     );
   } else {
     return div(
       { className: 'tasks-bar' },
       div({}, isLeader() ? 'Leader' : 'Follower'),
-      // props.tabs.map((tab) => p({}, tab)),
       // pomodoro timer
       h(pomodoroTimer, props),
       // buttons
@@ -515,7 +574,7 @@ function ui(props: AppState) {
       }),
       h(recurringTasksView, { key: 'recurring', ...props }),
       h(completedTasksView, { key: 'completed', ...props }),
-      h(audioUploadView, {}),
+      h(audioUploadView, props),
     );
   }
 }

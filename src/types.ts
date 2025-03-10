@@ -63,6 +63,8 @@ export type AppState = {
   breakDuration: number;
   speaker: string;
 
+  audioUploadState: number;
+
   sessionTasks: TaskList;
   recurringTasks: TaskList;
   completedTasks: TaskList;
