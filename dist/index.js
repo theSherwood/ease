@@ -1011,6 +1011,9 @@ async function handleAudioUpload(files) {
   appState.audioUploadState = 1;
   redraw();
 }
+function centerFromRect(rect) {
+  return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+}
 function axisFromDirection(dir) {
   if (dir === 0 /* Up */ || dir === 1 /* Down */) return 1 /* Y */;
   if (dir === 2 /* Left */ || dir === 3 /* Right */) return 0 /* X */;
@@ -1024,26 +1027,39 @@ function secondaryAxisFromDirection(dir) {
 var lastRect = null;
 var lastAxis = 2 /* None */;
 var lastTargetCoords = { x: Infinity, y: Infinity };
-var container = document;
-container.addEventListener("focusin", (event) => {
-  if (event.target instanceof Element) lastRect = event.target.getBoundingClientRect();
-});
-container.addEventListener("focusout", () => {
-  setTimeout(() => {
-    if (!container.contains(document.activeElement) || document.activeElement === document.body) {
-      lastTargetCoords = { x: Infinity, y: Infinity };
-      if (lastRect) {
-        let closest = getNearestEl(getNavigableElements, lastRect, 4 /* None */);
-        if (closest) closest.focus();
+var lastDirection = 4 /* None */;
+function resetNavState() {
+  lastTargetCoords = { x: Infinity, y: Infinity };
+  lastDirection = 4 /* None */;
+  lastAxis = 2 /* None */;
+}
+{
+  let container = document;
+  container.addEventListener("focusin", (event) => {
+    if (event.target instanceof Element) lastRect = event.target.getBoundingClientRect();
+  });
+  container.addEventListener("focusout", () => {
+    setTimeout(() => {
+      if (!container.contains(document.activeElement) || document.activeElement === document.body) {
+        resetNavState();
+        if (lastRect) {
+          let targetCoords = centerFromRect(lastRect);
+          targetCoords = updateNavigationState(targetCoords, 4 /* None */);
+          let closest = getNearestEl(getNavigableElements, targetCoords, 4 /* None */);
+          if (closest) closest.focus();
+        }
       }
+    }, 0);
+  });
+  container.addEventListener("keydown", (e) => {
+    if (e.key === "Tab") {
+      resetNavState();
     }
-  }, 0);
-});
-container.addEventListener("keydown", (e) => {
-  if (e.key === "Tab") {
-    lastTargetCoords = { x: Infinity, y: Infinity };
-  }
-});
+  });
+  container.addEventListener("mousedown", (e) => {
+    resetNavState();
+  });
+}
 function groupElementsByRow(getElementCandidates) {
   const elements = getElementCandidates();
   if (elements.length === 0) return [];
@@ -1100,12 +1116,13 @@ function groupElementsByColumn(getElementCandidates) {
   );
   return columns;
 }
-function getNavigableElements(container2 = document) {
-  return Array.from(container2.querySelectorAll("input:not(.skip-navigation), .navigable")).filter(
+function getNavigableElements(container = document) {
+  return Array.from(container.querySelectorAll("input:not(.skip-navigation), .navigable")).filter(
     (el) => !el.hasAttribute("disabled")
   );
 }
-function getNextNonOverlappingRowOrColumn(getElementCandidates, x, y, direction) {
+function getNextNonOverlappingRowOrColumn(getElementCandidates, coords, direction) {
+  const { x, y } = coords;
   const rows = groupElementsByRow(getElementCandidates);
   const columns = groupElementsByColumn(getElementCandidates);
   if (direction === 1 /* Down */ || direction === 0 /* Up */) {
@@ -1139,13 +1156,14 @@ function getNextNonOverlappingRowOrColumn(getElementCandidates, x, y, direction)
   }
   return null;
 }
-function findClosestElementInRowOrColumn(x, y, axis, group) {
+function findClosestElementInRowOrColumn(coords, axis, group) {
   if (!group || group.length === 0) return null;
   let closest = document;
   let distance = Infinity;
   for (const el of group) {
     let rect = el.getBoundingClientRect();
-    let dist = axis === 0 /* X */ ? Math.abs(rect.left + rect.width / 2 - x) : Math.abs(rect.top + rect.height / 2 - y);
+    let dist = axis === 0 /* X */ ? Math.abs(rect.left + rect.width / 2 - coords.x) : Math.abs(rect.top + rect.height / 2 - coords.y);
+    console.log("dist", dist, el);
     if (dist < distance) {
       distance = dist;
       closest = el;
@@ -1154,24 +1172,31 @@ function findClosestElementInRowOrColumn(x, y, axis, group) {
   if (closest === document) return null;
   return closest;
 }
-function getNearestEl(getNavigableElements2, elBox, dir) {
-  let targetCoords = { x: elBox.left + elBox.width / 2, y: elBox.top + elBox.height / 2 };
-  if (1) {
-    let newAxis = axisFromDirection(dir);
-    if (newAxis === lastAxis) {
-      if (newAxis === 0 /* X */) {
-        if (lastTargetCoords.y !== Infinity) targetCoords.y = lastTargetCoords.y;
-        lastTargetCoords = targetCoords;
-      } else if (newAxis === 1 /* Y */) {
-        if (lastTargetCoords.x !== Infinity) targetCoords.x = lastTargetCoords.x;
-        lastTargetCoords = targetCoords;
-      } else {
-        lastTargetCoords = { x: Infinity, y: Infinity };
-      }
+function updateNavigationState(targetCoords, dir) {
+  let target = { ...targetCoords };
+  let newAxis = axisFromDirection(dir);
+  if (newAxis === 2 /* None */) {
+    lastAxis = 2 /* None */;
+    lastDirection = 4 /* None */;
+    lastTargetCoords = { x: Infinity, y: Infinity };
+  } else if (newAxis === lastAxis) {
+    if (newAxis === 0 /* X */) {
+      if (lastTargetCoords.y !== Infinity) target.y = lastTargetCoords.y;
+      lastTargetCoords = target;
+    } else if (newAxis === 1 /* Y */) {
+      if (lastTargetCoords.x !== Infinity) target.x = lastTargetCoords.x;
+      lastTargetCoords = target;
+    } else {
+      lastTargetCoords = { x: Infinity, y: Infinity };
     }
-    lastAxis = newAxis;
+  } else {
+    lastTargetCoords = target;
   }
-  console.log("target coords", targetCoords);
+  lastAxis = newAxis;
+  lastDirection = dir;
+  return target;
+}
+function getNearestEl(getNavigableElements2, targetCoords, dir) {
   if (dir === 4 /* None */) {
     let elements = getNavigableElements2();
     let closest2 = document;
@@ -1190,16 +1215,10 @@ function getNearestEl(getNavigableElements2, elBox, dir) {
     if (closest2 === document) return null;
     return closest2;
   }
-  let rowOrColumn = getNextNonOverlappingRowOrColumn(
-    getNavigableElements2,
-    targetCoords.x,
-    targetCoords.y,
-    dir
-  );
+  let rowOrColumn = getNextNonOverlappingRowOrColumn(getNavigableElements2, targetCoords, dir);
   if (!rowOrColumn) return null;
   let closest = findClosestElementInRowOrColumn(
-    targetCoords.x,
-    targetCoords.y,
+    targetCoords,
     secondaryAxisFromDirection(dir),
     rowOrColumn
   );
@@ -1207,7 +1226,9 @@ function getNearestEl(getNavigableElements2, elBox, dir) {
 }
 function navigateEl(el, dir) {
   let elBox = el.getBoundingClientRect();
-  let closest = getNearestEl(getNavigableElements, elBox, dir);
+  let targetCoords = centerFromRect(elBox);
+  targetCoords = updateNavigationState(targetCoords, dir);
+  let closest = getNearestEl(getNavigableElements, targetCoords, dir);
   if (closest) closest.focus();
 }
 var styles = {
@@ -1375,6 +1396,9 @@ function taskView({ task, active = false }, { dragState = 0 /* None */ }, update
         console.log("key", e.key);
         if (e.key === "ArrowUp") navigateEl(e.target, 0 /* Up */);
         if (e.key === "ArrowDown") navigateEl(e.target, 1 /* Down */);
+        if (e.key === "ArrowRight" && e.target.selectionStart === e.target.value.length) {
+          navigateEl(e.target, 3 /* Right */);
+        }
       }
     }),
     input({
@@ -1387,6 +1411,14 @@ function taskView({ task, active = false }, { dragState = 0 /* None */ }, update
         if (e.key === "Enter") updateTimeEstimate(e);
         if (e.key === "ArrowUp") navigateEl(e.target, 0 /* Up */);
         if (e.key === "ArrowDown") navigateEl(e.target, 1 /* Down */);
+        if (e.key === "ArrowLeft" && e.target.selectionStart === 0) {
+          console.log("left");
+          navigateEl(e.target, 2 /* Left */);
+        }
+        if (e.key === "ArrowRight" && e.target.selectionStart === e.target.value.length) {
+          console.log("right");
+          navigateEl(e.target, 3 /* Right */);
+        }
       }
     }),
     div(
@@ -1539,13 +1571,7 @@ function sessionButton({ onclick, label }) {
     {
       class: "session-button navigable",
       onclick,
-      onkeydown: (e) => {
-        console.log("key", e.key);
-        if (e.key === "ArrowUp") navigateEl(e.target, 0 /* Up */);
-        if (e.key === "ArrowDown") navigateEl(e.target, 1 /* Down */);
-        if (e.key === "ArrowLeft") navigateEl(e.target, 2 /* Left */);
-        if (e.key === "ArrowRight") navigateEl(e.target, 3 /* Right */);
-      }
+      onkeydown: basicKeydownNavigationHandler
     },
     label
   );

@@ -73,6 +73,12 @@ async function handleAudioUpload(files: File[]) {
   redraw();
 }
 
+type Coords = { x: number; y: number };
+
+function centerFromRect(rect: DOMRect): Coords {
+  return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+}
+
 enum Axis {
   X,
   Y,
@@ -99,29 +105,45 @@ function secondaryAxisFromDirection(dir: Direction) {
   return Axis.None;
 }
 
+// NAV STATE
 let lastRect: DOMRect | null = null;
 let lastAxis: Axis = Axis.None;
-let lastTargetCoords = { x: Infinity, y: Infinity };
-let container = document;
-container.addEventListener('focusin', (event) => {
-  if (event.target instanceof Element) lastRect = event.target.getBoundingClientRect();
-});
-container.addEventListener('focusout', () => {
-  setTimeout(() => {
-    if (!container.contains(document.activeElement) || document.activeElement === document.body) {
-      lastTargetCoords = { x: Infinity, y: Infinity };
-      if (lastRect) {
-        let closest = getNearestEl(getNavigableElements, lastRect, Direction.None);
-        if (closest) closest.focus();
+let lastTargetCoords: Coords = { x: Infinity, y: Infinity };
+let lastDirection: Direction = Direction.None;
+
+function resetNavState() {
+  lastTargetCoords = { x: Infinity, y: Infinity };
+  lastDirection = Direction.None;
+  lastAxis = Axis.None;
+}
+
+{
+  let container = document;
+  container.addEventListener('focusin', (event) => {
+    if (event.target instanceof Element) lastRect = event.target.getBoundingClientRect();
+  });
+  container.addEventListener('focusout', () => {
+    setTimeout(() => {
+      if (!container.contains(document.activeElement) || document.activeElement === document.body) {
+        resetNavState();
+        if (lastRect) {
+          let targetCoords = centerFromRect(lastRect);
+          targetCoords = updateNavigationState(targetCoords, Direction.None);
+          let closest = getNearestEl(getNavigableElements, targetCoords, Direction.None);
+          if (closest) closest.focus();
+        }
       }
+    }, 0);
+  });
+  container.addEventListener('keydown', (e) => {
+    if (e.key === 'Tab') {
+      resetNavState();
     }
-  }, 0);
-});
-container.addEventListener('keydown', (e) => {
-  if (e.key === 'Tab') {
-    lastTargetCoords = { x: Infinity, y: Infinity };
-  }
-});
+  });
+  container.addEventListener('mousedown', (e) => {
+    resetNavState();
+  });
+}
 
 function groupElementsByRow(getElementCandidates: () => Element[]) {
   const elements: Element[] = getElementCandidates();
@@ -215,10 +237,10 @@ function getNavigableElements(container = document) {
 
 function getNextNonOverlappingRowOrColumn(
   getElementCandidates: () => Element[],
-  x: number,
-  y: number,
+  coords: Coords,
   direction: Direction,
 ) {
+  const { x, y } = coords;
   const rows = groupElementsByRow(getElementCandidates);
   const columns = groupElementsByColumn(getElementCandidates);
 
@@ -257,7 +279,7 @@ function getNextNonOverlappingRowOrColumn(
   return null;
 }
 
-function findClosestElementInRowOrColumn(x: number, y: number, axis: Axis, group: Element[]) {
+function findClosestElementInRowOrColumn(coords: Coords, axis: Axis, group: Element[]) {
   if (!group || group.length === 0) return null;
 
   let closest: Node = document;
@@ -267,8 +289,9 @@ function findClosestElementInRowOrColumn(x: number, y: number, axis: Axis, group
     let rect = el.getBoundingClientRect();
     let dist =
       axis === Axis.X
-        ? Math.abs(rect.left + rect.width / 2 - x)
-        : Math.abs(rect.top + rect.height / 2 - y);
+        ? Math.abs(rect.left + rect.width / 2 - coords.x)
+        : Math.abs(rect.top + rect.height / 2 - coords.y);
+    console.log('dist', dist, el);
 
     if (dist < distance) {
       distance = dist;
@@ -280,26 +303,37 @@ function findClosestElementInRowOrColumn(x: number, y: number, axis: Axis, group
   return closest;
 }
 
-function getNearestEl(getNavigableElements: () => Element[], elBox: DOMRect, dir: Direction) {
-  let targetCoords = { x: elBox.left + elBox.width / 2, y: elBox.top + elBox.height / 2 };
-  if (1) {
-    let newAxis = axisFromDirection(dir);
-    if (newAxis === lastAxis) {
-      // Maintain a goal column/row when continuing in the same axis
-      if (newAxis === Axis.X) {
-        if (lastTargetCoords.y !== Infinity) targetCoords.y = lastTargetCoords.y;
-        lastTargetCoords = targetCoords;
-      } else if (newAxis === Axis.Y) {
-        if (lastTargetCoords.x !== Infinity) targetCoords.x = lastTargetCoords.x;
-        lastTargetCoords = targetCoords;
-      } else {
-        lastTargetCoords = { x: Infinity, y: Infinity };
-      }
+function updateNavigationState(targetCoords: { x: number; y: number }, dir: Direction) {
+  let target = { ...targetCoords };
+  let newAxis = axisFromDirection(dir);
+  if (newAxis === Axis.None) {
+    lastAxis = Axis.None;
+    lastDirection = Direction.None;
+    lastTargetCoords = { x: Infinity, y: Infinity };
+  } else if (newAxis === lastAxis) {
+    // Maintain a goal column/row when continuing in the same axis
+    if (newAxis === Axis.X) {
+      if (lastTargetCoords.y !== Infinity) target.y = lastTargetCoords.y;
+      lastTargetCoords = target;
+    } else if (newAxis === Axis.Y) {
+      if (lastTargetCoords.x !== Infinity) target.x = lastTargetCoords.x;
+      lastTargetCoords = target;
+    } else {
+      lastTargetCoords = { x: Infinity, y: Infinity };
     }
-    lastAxis = newAxis;
+  } else {
+    lastTargetCoords = target;
   }
-  console.log('target coords', targetCoords);
+  lastAxis = newAxis;
+  lastDirection = dir;
+  return target;
+}
 
+function getNearestEl(
+  getNavigableElements: () => Element[],
+  targetCoords: { x: number; y: number },
+  dir: Direction,
+) {
   if (dir === Direction.None) {
     // Find element closest to the center
     let elements = getNavigableElements();
@@ -319,16 +353,10 @@ function getNearestEl(getNavigableElements: () => Element[], elBox: DOMRect, dir
     if (closest === document) return null;
     return closest;
   }
-  let rowOrColumn = getNextNonOverlappingRowOrColumn(
-    getNavigableElements,
-    targetCoords.x,
-    targetCoords.y,
-    dir,
-  );
+  let rowOrColumn = getNextNonOverlappingRowOrColumn(getNavigableElements, targetCoords, dir);
   if (!rowOrColumn) return null;
   let closest = findClosestElementInRowOrColumn(
-    targetCoords.x,
-    targetCoords.y,
+    targetCoords,
     secondaryAxisFromDirection(dir),
     rowOrColumn,
   );
@@ -337,7 +365,9 @@ function getNearestEl(getNavigableElements: () => Element[], elBox: DOMRect, dir
 
 function navigateEl(el: Element, dir: Direction) {
   let elBox = el.getBoundingClientRect();
-  let closest = getNearestEl(getNavigableElements, elBox, dir);
+  let targetCoords = centerFromRect(elBox);
+  targetCoords = updateNavigationState(targetCoords, dir);
+  let closest = getNearestEl(getNavigableElements, targetCoords, dir);
   if (closest) closest.focus();
 }
 
@@ -535,6 +565,9 @@ function taskView(
         console.log('key', e.key);
         if (e.key === 'ArrowUp') navigateEl(e.target, Direction.Up);
         if (e.key === 'ArrowDown') navigateEl(e.target, Direction.Down);
+        if (e.key === 'ArrowRight' && e.target.selectionStart === e.target.value.length) {
+          navigateEl(e.target, Direction.Right);
+        }
       },
     }),
     input({
@@ -547,6 +580,14 @@ function taskView(
         if (e.key === 'Enter') updateTimeEstimate(e);
         if (e.key === 'ArrowUp') navigateEl(e.target, Direction.Up);
         if (e.key === 'ArrowDown') navigateEl(e.target, Direction.Down);
+        if (e.key === 'ArrowLeft' && e.target.selectionStart === 0) {
+          console.log('left');
+          navigateEl(e.target, Direction.Left);
+        }
+        if (e.key === 'ArrowRight' && e.target.selectionStart === e.target.value.length) {
+          console.log('right');
+          navigateEl(e.target, Direction.Right);
+        }
       },
     }),
     div(
@@ -711,13 +752,7 @@ function sessionButton({ onclick, label }: { onclick: () => void; label: string 
     {
       class: 'session-button navigable',
       onclick,
-      onkeydown: (e) => {
-        console.log('key', e.key);
-        if (e.key === 'ArrowUp') navigateEl(e.target, Direction.Up);
-        if (e.key === 'ArrowDown') navigateEl(e.target, Direction.Down);
-        if (e.key === 'ArrowLeft') navigateEl(e.target, Direction.Left);
-        if (e.key === 'ArrowRight') navigateEl(e.target, Direction.Right);
-      },
+      onkeydown: basicKeydownNavigationHandler,
     },
     label,
   );
