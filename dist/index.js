@@ -1011,6 +1011,205 @@ async function handleAudioUpload(files) {
   appState.audioUploadState = 1;
   redraw();
 }
+function axisFromDirection(dir) {
+  if (dir === 0 /* Up */ || dir === 1 /* Down */) return 1 /* Y */;
+  if (dir === 2 /* Left */ || dir === 3 /* Right */) return 0 /* X */;
+  return 2 /* None */;
+}
+function secondaryAxisFromDirection(dir) {
+  if (dir === 0 /* Up */ || dir === 1 /* Down */) return 0 /* X */;
+  if (dir === 2 /* Left */ || dir === 3 /* Right */) return 1 /* Y */;
+  return 2 /* None */;
+}
+var lastRect = null;
+var lastAxis = 2 /* None */;
+var lastTargetCoords = { x: Infinity, y: Infinity };
+var container = document;
+container.addEventListener("focusin", (event) => {
+  if (event.target instanceof Element) lastRect = event.target.getBoundingClientRect();
+});
+container.addEventListener("focusout", () => {
+  setTimeout(() => {
+    if (!container.contains(document.activeElement) || document.activeElement === document.body) {
+      lastTargetCoords = { x: Infinity, y: Infinity };
+      if (lastRect) {
+        let closest = getNearestEl(getNavigableElements, lastRect, 4 /* None */);
+        if (closest) closest.focus();
+      }
+    }
+  }, 0);
+});
+container.addEventListener("keydown", (e) => {
+  if (e.key === "Tab") {
+    lastTargetCoords = { x: Infinity, y: Infinity };
+  }
+});
+function groupElementsByRow(getElementCandidates) {
+  const elements = getElementCandidates();
+  if (elements.length === 0) return [];
+  elements.sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top);
+  let rows = [];
+  elements.forEach((element) => {
+    let rect = element.getBoundingClientRect();
+    let added = false;
+    for (let row of rows) {
+      let firstInRow = row[0].getBoundingClientRect();
+      let overlapHeight = Math.min(rect.bottom, firstInRow.bottom) - Math.max(rect.top, firstInRow.top);
+      let elementHeight = rect.bottom - rect.top;
+      let rowHeight = firstInRow.bottom - firstInRow.top;
+      if (overlapHeight / elementHeight > 0.5 || overlapHeight / rowHeight > 0.5) {
+        row.push(element);
+        added = true;
+        break;
+      }
+    }
+    if (!added) {
+      rows.push([element]);
+    }
+  });
+  rows.forEach(
+    (row) => row.sort((a, b) => a.getBoundingClientRect().left - b.getBoundingClientRect().left)
+  );
+  return rows;
+}
+function groupElementsByColumn(getElementCandidates) {
+  const elements = getElementCandidates();
+  if (elements.length === 0) return [];
+  elements.sort((a, b) => a.getBoundingClientRect().left - b.getBoundingClientRect().left);
+  let columns = [];
+  elements.forEach((element) => {
+    let rect = element.getBoundingClientRect();
+    let added = false;
+    for (let column of columns) {
+      let firstInColumn = column[0].getBoundingClientRect();
+      let overlapWidth = Math.min(rect.right, firstInColumn.right) - Math.max(rect.left, firstInColumn.left);
+      let elementWidth = rect.right - rect.left;
+      let columnWidth = firstInColumn.right - firstInColumn.left;
+      if (overlapWidth / elementWidth > 0.5 || overlapWidth / columnWidth > 0.5) {
+        column.push(element);
+        added = true;
+        break;
+      }
+    }
+    if (!added) {
+      columns.push([element]);
+    }
+  });
+  columns.forEach(
+    (column) => column.sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top)
+  );
+  return columns;
+}
+function getNavigableElements(container2 = document) {
+  return Array.from(container2.querySelectorAll("input:not(.skip-navigation), .navigable")).filter(
+    (el) => !el.hasAttribute("disabled")
+  );
+}
+function getNextNonOverlappingRowOrColumn(getElementCandidates, x, y, direction) {
+  const rows = groupElementsByRow(getElementCandidates);
+  const columns = groupElementsByColumn(getElementCandidates);
+  if (direction === 1 /* Down */ || direction === 0 /* Up */) {
+    let selectedRow = rows.find(
+      (row) => row.some((el) => {
+        let rect = el.getBoundingClientRect();
+        return rect.top <= y && rect.bottom >= y;
+      })
+    );
+    if (direction === 1 /* Down */ && selectedRow) {
+      let index = rows.indexOf(selectedRow);
+      return index + 1 < rows.length ? rows[index + 1] : null;
+    } else if (direction === 0 /* Up */ && selectedRow) {
+      let index = rows.indexOf(selectedRow);
+      return index - 1 >= 0 ? rows[index - 1] : null;
+    }
+  } else {
+    let selectedColumn = columns.find(
+      (column) => column.some((el) => {
+        let rect = el.getBoundingClientRect();
+        return rect.left <= x && rect.right >= x;
+      })
+    );
+    if (direction === 3 /* Right */ && selectedColumn) {
+      let index = columns.indexOf(selectedColumn);
+      return index + 1 < columns.length ? columns[index + 1] : null;
+    } else if (direction === 2 /* Left */ && selectedColumn) {
+      let index = columns.indexOf(selectedColumn);
+      return index - 1 >= 0 ? columns[index - 1] : null;
+    }
+  }
+  return null;
+}
+function findClosestElementInRowOrColumn(x, y, axis, group) {
+  if (!group || group.length === 0) return null;
+  let closest = document;
+  let distance = Infinity;
+  for (const el of group) {
+    let rect = el.getBoundingClientRect();
+    let dist = axis === 0 /* X */ ? Math.abs(rect.left + rect.width / 2 - x) : Math.abs(rect.top + rect.height / 2 - y);
+    if (dist < distance) {
+      distance = dist;
+      closest = el;
+    }
+  }
+  if (closest === document) return null;
+  return closest;
+}
+function getNearestEl(getNavigableElements2, elBox, dir) {
+  let targetCoords = { x: elBox.left + elBox.width / 2, y: elBox.top + elBox.height / 2 };
+  if (1) {
+    let newAxis = axisFromDirection(dir);
+    if (newAxis === lastAxis) {
+      if (newAxis === 0 /* X */) {
+        if (lastTargetCoords.y !== Infinity) targetCoords.y = lastTargetCoords.y;
+        lastTargetCoords = targetCoords;
+      } else if (newAxis === 1 /* Y */) {
+        if (lastTargetCoords.x !== Infinity) targetCoords.x = lastTargetCoords.x;
+        lastTargetCoords = targetCoords;
+      } else {
+        lastTargetCoords = { x: Infinity, y: Infinity };
+      }
+    }
+    lastAxis = newAxis;
+  }
+  console.log("target coords", targetCoords);
+  if (dir === 4 /* None */) {
+    let elements = getNavigableElements2();
+    let closest2 = document;
+    let distance = Infinity;
+    for (const el of elements) {
+      let rect = el.getBoundingClientRect();
+      let dist = Math.hypot(
+        targetCoords.x - (rect.left + rect.width / 2),
+        targetCoords.y - (rect.top + rect.height / 2)
+      );
+      if (dist < distance) {
+        distance = dist;
+        closest2 = el;
+      }
+    }
+    if (closest2 === document) return null;
+    return closest2;
+  }
+  let rowOrColumn = getNextNonOverlappingRowOrColumn(
+    getNavigableElements2,
+    targetCoords.x,
+    targetCoords.y,
+    dir
+  );
+  if (!rowOrColumn) return null;
+  let closest = findClosestElementInRowOrColumn(
+    targetCoords.x,
+    targetCoords.y,
+    secondaryAxisFromDirection(dir),
+    rowOrColumn
+  );
+  return closest;
+}
+function navigateEl(el, dir) {
+  let elBox = el.getBoundingClientRect();
+  let closest = getNearestEl(getNavigableElements, elBox, dir);
+  if (closest) closest.focus();
+}
 var styles = {
   task: {
     borderTop: "2px solid transparent",
@@ -1070,7 +1269,7 @@ function sectionHeader({ title, collapsed, oncollapse, onexpand }) {
     {},
     button(
       {
-        class: "collapse-button",
+        class: "collapse-button navigable",
         onclick: () => {
           if (collapsed) {
             onexpand();
@@ -1082,12 +1281,21 @@ function sectionHeader({ title, collapsed, oncollapse, onexpand }) {
           console.log("key", e.key);
           if (e.key === "ArrowLeft") oncollapse();
           if (e.key === "ArrowRight") onexpand();
+          if (e.key === "ArrowUp") navigateEl(e.target, 0 /* Up */);
+          if (e.key === "ArrowDown") navigateEl(e.target, 1 /* Down */);
         }
       },
       div({ class: "collapse-icon" }, collapsed ? "\u25B8" : "\u25BE"),
       h1({ class: "section-header" }, title)
     )
   );
+}
+function basicKeydownNavigationHandler(e) {
+  console.log("key", e.key);
+  if (e.key === "ArrowUp") navigateEl(e.target, 0 /* Up */);
+  if (e.key === "ArrowDown") navigateEl(e.target, 1 /* Down */);
+  if (e.key === "ArrowLeft") navigateEl(e.target, 2 /* Left */);
+  if (e.key === "ArrowRight") navigateEl(e.target, 3 /* Right */);
 }
 function taskView({ task, active = false }, { dragState = 0 /* None */ }, update) {
   function updateTimeEstimate(e) {
@@ -1162,6 +1370,11 @@ function taskView({ task, active = false }, { dragState = 0 /* None */ }, update
       value: task.description,
       oninput: (e) => {
         updateTask(task, { description: e.target.value });
+      },
+      onkeydown: (e) => {
+        console.log("key", e.key);
+        if (e.key === "ArrowUp") navigateEl(e.target, 0 /* Up */);
+        if (e.key === "ArrowDown") navigateEl(e.target, 1 /* Down */);
       }
     }),
     input({
@@ -1171,16 +1384,25 @@ function taskView({ task, active = false }, { dragState = 0 /* None */ }, update
         updateTimeEstimate(e);
       },
       onkeydown: (e) => {
-        if (e.key === "Enter") {
-          updateTimeEstimate(e);
-        }
+        if (e.key === "Enter") updateTimeEstimate(e);
+        if (e.key === "ArrowUp") navigateEl(e.target, 0 /* Up */);
+        if (e.key === "ArrowDown") navigateEl(e.target, 1 /* Down */);
       }
     }),
     div(
       {},
-      active && button({ onclick: () => updateTask(task, { status: TASK_COMPLETED }) }, "\u2713"),
+      active && button(
+        {
+          class: "navigable",
+          onkeydown: basicKeydownNavigationHandler,
+          onclick: () => updateTask(task, { status: TASK_COMPLETED })
+        },
+        "\u2713"
+      ),
       task.status === TASK_RECURRING && button(
         {
+          class: "navigable",
+          onkeydown: basicKeydownNavigationHandler,
           onclick: () => {
             let description = task.description;
             if (!description) return;
@@ -1199,7 +1421,14 @@ function taskView({ task, active = false }, { dragState = 0 /* None */ }, update
         },
         "+"
       ),
-      button({ class: "delete-button", onclick: () => deleteTask(task) }, "\u2715")
+      button(
+        {
+          class: "delete-button navigable",
+          onkeydown: basicKeydownNavigationHandler,
+          onclick: () => deleteTask(task)
+        },
+        "\u2715"
+      )
     )
   );
 }
@@ -1245,20 +1474,23 @@ function newTaskInput({ status }) {
           onCreateTask(status, e.target.value);
           e.target.value = "";
         }
+        if (e.key === "ArrowUp") navigateEl(e.target, 0 /* Up */);
+        if (e.key === "ArrowDown") navigateEl(e.target, 1 /* Down */);
       }
     }),
     div(
       { style: { display: "flex" } },
       button(
         {
-          class: "square-button",
+          class: "square-button navigable",
           onclick: (e) => {
             let inputEl = e.target.previousElementSibling;
             let value = inputEl.value;
             if (!value) return;
             onCreateTask(status, value);
             inputEl.value = "";
-          }
+          },
+          onkeydown: basicKeydownNavigationHandler
         },
         "+"
       ),
@@ -1303,7 +1535,20 @@ function completedTasksView({ completedTasks: completedTasks2 }, { collapsed = t
   );
 }
 function sessionButton({ onclick, label }) {
-  return button({ onclick }, label);
+  return button(
+    {
+      class: "session-button navigable",
+      onclick,
+      onkeydown: (e) => {
+        console.log("key", e.key);
+        if (e.key === "ArrowUp") navigateEl(e.target, 0 /* Up */);
+        if (e.key === "ArrowDown") navigateEl(e.target, 1 /* Down */);
+        if (e.key === "ArrowLeft") navigateEl(e.target, 2 /* Left */);
+        if (e.key === "ArrowRight") navigateEl(e.target, 3 /* Right */);
+      }
+    },
+    label
+  );
 }
 function pomodoroTimer({ checkpoint, countup, pomodoroDuration, breakDuration, status, speaker }, { renderSignal = 0, prevTimeRemaining = 0 }, update) {
   let now = Date.now();
