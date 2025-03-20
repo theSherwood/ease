@@ -21,6 +21,8 @@ import {
   rollcall,
   flipCountDirection,
   resumeSession,
+  setPomodoroDuration,
+  setBreakDuration,
 } from './events';
 import { render, diff, h, dom, DNode } from './vdom';
 import {
@@ -402,6 +404,7 @@ function parseHumanReadableTime(hrTime: string): number {
     let time = 0;
     let includesHours = timeStr.includes('h');
     let includesMinutes = timeStr.includes('m');
+    let includesSeconds = timeStr.includes('s');
     if (includesHours) {
       const hours = parseInt(timeStr.split('h', 2)[0]);
       if (hours) time += hours * 60 * 60;
@@ -411,7 +414,11 @@ function parseHumanReadableTime(hrTime: string): number {
       const minutes = parseInt(timeStr.split('m', 2)[0]);
       if (minutes) time += minutes * 60;
     }
-    if (!includesHours && !includesMinutes) {
+    if (includesSeconds) {
+      const seconds = parseInt(timeStr.split('s', 2)[0]);
+      if (seconds) time += seconds;
+    }
+    if (!includesHours && !includesMinutes && !includesSeconds) {
       time = parseInt(timeStr) * 60;
     }
     return time;
@@ -420,25 +427,45 @@ function parseHumanReadableTime(hrTime: string): number {
   }
 }
 
-function partitionTime(time: number): { hours; minutes; seconds } {
+type PartitionedTime = {
+  hours: number;
+  minutes: number;
+  seconds: number;
+};
+
+function partitionTime(time: number): PartitionedTime {
   const hours = Math.floor(time / 3600);
   const minutes = Math.floor((time % 3600) / 60);
   const seconds = Math.floor(time % 60);
   return { hours, minutes, seconds };
 }
 
-function formatTime(time: number): string {
-  const { hours, minutes, seconds } = partitionTime(time);
+type FormatTimeOptions = {
+  forceHours?: boolean;
+  forceMinutes?: boolean;
+  forceSeconds?: boolean;
+  pad?: number;
+};
+
+function formatTime(time: PartitionedTime, opts: FormatTimeOptions = {}): string {
+  const { hours, minutes, seconds } = time;
+  const { pad = 1 } = opts;
   let res = '';
-  if (hours > 0) res += `${hours}h `;
-  if (minutes > 0) res += `${minutes}m`;
-  if (seconds > 0) res += `${seconds}s`;
-  if (res === '') res = '0m';
+  if (hours > 0 || opts.forceHours) res += `${hours}h`.padStart(pad + 1, '0');
+  if (minutes > 0 || opts.forceMinutes) {
+    if (res !== '') res += ' ';
+    res += `${minutes}m`.padStart(pad + 1, '0');
+  }
+  if (seconds > 0 || opts.forceSeconds) {
+    if (res !== '') res += ' ';
+    res += `${seconds}s`.padStart(pad + 1, '0');
+  }
+  if (res === '') res = '0m'.padStart(pad + 1, '0');
   return res;
 }
 
-function padTime(time: number): string {
-  return time.toString().padStart(2, '0');
+function formatTimestamp(timestamp: number, opts: FormatTimeOptions = {}): string {
+  return formatTime(partitionTime(timestamp), opts);
 }
 
 enum DragState {
@@ -626,7 +653,7 @@ createdAt: ${createdAt} - ${daysAgoLabel}
     }),
     input({
       class: 'time-input',
-      value: formatTime(task.timeEstimate),
+      value: formatTimestamp(task.timeEstimate),
       onblur: (e) => {
         updateTimeEstimate(e);
       },
@@ -801,9 +828,19 @@ function sessionButtonView({ onclick, label }: { onclick: () => void; label: str
 
 function pomodoroTimerView(
   { checkpoint, countup, pomodoroDuration, breakDuration, status, speaker }: AppState,
-  { renderSignal = 0, prevTimeRemaining = 0 },
+  { renderSignal = 0, prevTimeRemaining = 0, editing = false, editingValue = '' },
   update,
 ) {
+  function updateTimerFromInput(e) {
+    let time = parseHumanReadableTime(e.target.value);
+    update({ editing: false, editingValue: '' });
+    if (status === APP_ACTIVE) {
+      setPomodoroDuration(time);
+    } else if (status === APP_BREAK) {
+      setBreakDuration(time);
+    }
+  }
+
   let now = Date.now();
   let negative = false;
   let duration = status === APP_ACTIVE ? pomodoroDuration : breakDuration;
@@ -843,13 +880,35 @@ function pomodoroTimerView(
   }
 
   let className = 'pomodoro';
-  if (negative || (countup && time > duration)) className += ' elapsed';
-  let label = `${padTime(hours)}:${padTime(minutes)}:${padTime(seconds)}`;
-  if (negative) label = '-' + label;
+  let label = '';
+  if (editing) label = editingValue;
+  else {
+    if (negative || (countup && time > duration)) className += ' elapsed';
+    label = formatTime(
+      { hours, minutes, seconds },
+      { forceMinutes: true, forceSeconds: true, pad: 2 },
+    );
+    if (negative) label = '-' + label;
+  }
+
   return div(
     { class: 'pomodoro-wrapper' },
     button({ class: 'flip-icon', onclick: flipCountDirection }, '⮃'),
-    span({ className }, label),
+    input({
+      class: className,
+      value: label,
+      oninput: (e) => {
+        update({ editing: true, editingValue: e.target.value });
+      },
+      onblur: (e) => {
+        if (editing) updateTimerFromInput(e);
+      },
+      onkeydown: (e) => {
+        if (e.key === 'Enter' && editing) updateTimerFromInput(e);
+        if (e.key === 'ArrowUp') navigateEl(e.target, Direction.Up);
+        if (e.key === 'ArrowDown') navigateEl(e.target, Direction.Down);
+      },
+    }),
   );
 }
 

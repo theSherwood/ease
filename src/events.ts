@@ -28,12 +28,7 @@ export const callback = {
 };
 
 const channel = new BroadcastChannel('ease');
-type MessageTypes =
-  | 'rollcallInit'
-  | 'rollcallRespond'
-  | 'goodbye'
-  | 'updateTask'
-  | 'sessionChange';
+type MessageTypes = 'rollcallInit' | 'rollcallRespond' | 'goodbye' | 'updateTask' | 'sessionChange';
 type MessageData = {
   type: MessageTypes;
   id: number;
@@ -87,32 +82,44 @@ export function rollcall() {
   callback.onChange();
 }
 
-export async function flipCountDirection() {
+export async function broadcastSessionChange() {
   appState.leader = appState.tabId;
-  appState.countup = !appState.countup;
   callback.onChange();
   await writeToLocalStorage();
   postMessage({ type: 'sessionChange', id: 0 });
 }
 
-export async function startSession() {
+export async function flipCountDirection() {
+  appState.countup = !appState.countup;
+  await broadcastSessionChange();
+}
+
+export async function setPomodoroDuration(duration: number) {
+  appState.checkpoint = Date.now();
+  appState.pomodoroDuration = duration;
+  await broadcastSessionChange();
+}
+
+export async function setBreakDuration(duration: number) {
   appState.leader = appState.tabId;
+  appState.checkpoint = Date.now();
+  appState.breakDuration = duration;
+  await broadcastSessionChange();
+}
+
+export async function startSession() {
   appState.status = APP_ACTIVE;
   appState.sessionId = getSessionId();
   appState.checkpoint = Date.now();
-  callback.onChange();
-  await writeToLocalStorage();
-  postMessage({ type: 'sessionChange', id: 0 });
+  await broadcastSessionChange();
 }
+
 export async function breakSession() {
   const checkpoint = appState.checkpoint;
   const status = appState.status;
-  appState.leader = appState.tabId;
   appState.status = APP_BREAK;
   appState.checkpoint = Date.now();
-  callback.onChange();
-  await writeToLocalStorage();
-  postMessage({ type: 'sessionChange', id: 0 });
+  await broadcastSessionChange();
   await sessionSegmentStore.add({
     sessionId: appState.sessionId,
     kind: status === APP_ACTIVE ? APP_ACTIVE : APP_BREAK,
@@ -122,12 +129,9 @@ export async function breakSession() {
 }
 export async function resumeSession() {
   const checkpoint = appState.checkpoint;
-  appState.leader = appState.tabId;
   appState.status = APP_ACTIVE;
   appState.checkpoint = Date.now();
-  callback.onChange();
-  await writeToLocalStorage();
-  postMessage({ type: 'sessionChange', id: 0 });
+  await broadcastSessionChange();
   await sessionSegmentStore.add({
     sessionId: appState.sessionId,
     kind: APP_BREAK,
@@ -138,13 +142,10 @@ export async function resumeSession() {
 export async function endSession() {
   const checkpoint = appState.checkpoint;
   const sessionId = appState.sessionId;
-  appState.leader = appState.tabId;
   appState.status = APP_IDLE;
   appState.sessionId = SESSION_ID_DEFAULT;
   appState.checkpoint = 0;
-  callback.onChange();
-  await writeToLocalStorage();
-  postMessage({ type: 'sessionChange', id: 0 });
+  await broadcastSessionChange();
   await sessionSegmentStore.add({
     sessionId: sessionId,
     kind: APP_ACTIVE,
