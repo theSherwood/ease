@@ -982,7 +982,7 @@ var dom = tags.reduce((acc, tag) => {
 }, {});
 
 // src/index.ts
-var { div, h1, button, p, input, span, progress } = dom;
+var { div, h1, button, p, input, span } = dom;
 var DEFAULT_TASK_TIME = 25 * 60;
 setupStore().then(() => {
   populateTasks();
@@ -1216,6 +1216,39 @@ function getNearestEl(getNavigableElements2, targetCoords, dir) {
     if (closest2 === document) return null;
     return closest2;
   }
+  {
+    if (dir === 2 /* Left */) {
+      let elements = getNavigableElements2();
+      let closest2 = document;
+      let distance = Infinity;
+      for (const el of elements) {
+        let rect = el.getBoundingClientRect();
+        if (rect.right > targetCoords.x) continue;
+        if (rect.top > targetCoords.y || rect.bottom < targetCoords.y) continue;
+        let dist = targetCoords.x - rect.right;
+        if (dist < distance) {
+          distance = dist;
+          closest2 = el;
+        }
+      }
+      if (closest2 !== document) return closest2;
+    } else if (dir === 3 /* Right */) {
+      let elements = getNavigableElements2();
+      let closest2 = document;
+      let distance = Infinity;
+      for (const el of elements) {
+        let rect = el.getBoundingClientRect();
+        if (rect.left < targetCoords.x) continue;
+        if (rect.top > targetCoords.y || rect.bottom < targetCoords.y) continue;
+        let dist = rect.left - targetCoords.x;
+        if (dist < distance) {
+          distance = dist;
+          closest2 = el;
+        }
+      }
+      if (closest2 !== document) return closest2;
+    }
+  }
   let rowOrColumn = getNextNonOverlappingRowOrColumn(getNavigableElements2, targetCoords, dir);
   if (!rowOrColumn) return null;
   let closest = findClosestElementInRowOrColumn(
@@ -1377,11 +1410,8 @@ function taskView({ task, active = false }, { dragState = 0 /* None */ }, update
       className: "task",
       style: resolvedStyles,
       title: `
-createdAt: ${createdAt} - ${daysAgoLabel}
+${daysAgoLabel} - ${createdAt}
 `,
-      onmouseover: () => {
-        console.log("mouseover", task.id, task);
-      },
       draggable: true,
       ondragover: (e) => {
         e.preventDefault();
@@ -1544,6 +1574,7 @@ function newTaskInputView({ status }) {
         }
         if (e.key === "ArrowUp") navigateEl(e.target, 0 /* Up */);
         if (e.key === "ArrowDown") navigateEl(e.target, 1 /* Down */);
+        if (e.key === "ArrowRight") navigateEl(e.target, 3 /* Right */);
       }
     }),
     div(

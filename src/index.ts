@@ -39,7 +39,7 @@ import {
 } from './types';
 import { appState, isLeader } from './state';
 import { playSpeech, stopMusic } from './audioPlayer';
-const { div, h1, button, p, input, span, progress } = dom;
+const { div, h1, button, p, input, span } = dom;
 
 const DEFAULT_TASK_TIME = 25 * 60;
 
@@ -338,8 +338,9 @@ function getNearestEl(
   targetCoords: { x: number; y: number },
   dir: Direction,
 ) {
+  // If we don't have a direction, find the nearest element even if it overlaps
+  // the targetCoords.
   if (dir === Direction.None) {
-    // Find element closest to the center
     let elements = getNavigableElements();
     let closest: Node = document;
     let distance = Infinity;
@@ -357,6 +358,42 @@ function getNearestEl(
     if (closest === document) return null;
     return closest;
   }
+  {
+    // If we are going Left or Right, default to something like a ray cast.
+    // If we don't find anything, we will fall back to the row/column method.
+    if (dir === Direction.Left) {
+      let elements = getNavigableElements();
+      let closest: Node = document;
+      let distance = Infinity;
+      for (const el of elements) {
+        let rect = el.getBoundingClientRect();
+        if (rect.right > targetCoords.x) continue;
+        if (rect.top > targetCoords.y || rect.bottom < targetCoords.y) continue;
+        let dist = targetCoords.x - rect.right;
+        if (dist < distance) {
+          distance = dist;
+          closest = el;
+        }
+      }
+      if (closest !== document) return closest;
+    } else if (dir === Direction.Right) {
+      let elements = getNavigableElements();
+      let closest: Node = document;
+      let distance = Infinity;
+      for (const el of elements) {
+        let rect = el.getBoundingClientRect();
+        if (rect.left < targetCoords.x) continue;
+        if (rect.top > targetCoords.y || rect.bottom < targetCoords.y) continue;
+        let dist = rect.left - targetCoords.x;
+        if (dist < distance) {
+          distance = dist;
+          closest = el;
+        }
+      }
+      if (closest !== document) return closest;
+    }
+  }
+  // Fallback based on rows and columns
   let rowOrColumn = getNextNonOverlappingRowOrColumn(getNavigableElements, targetCoords, dir);
   if (!rowOrColumn) return null;
   let closest = findClosestElementInRowOrColumn(
@@ -573,16 +610,12 @@ function taskView(
       className: 'task',
       style: resolvedStyles,
       title: `
-createdAt: ${createdAt} - ${daysAgoLabel}
+${daysAgoLabel} - ${createdAt}
 `,
-      onmouseover: () => {
-        console.log('mouseover', task.id, task);
-      },
       draggable: true,
       ondragover: (e) => {
         e.preventDefault();
         e.dataTransfer.dropEffect = 'move';
-        // console.log('drag over', e);
         const taskDiv = document.getElementById(domId) as HTMLElement;
         // find whether the mouse is closer to the top or bottom of the element
         const rect = taskDiv.getBoundingClientRect();
@@ -749,6 +782,7 @@ function newTaskInputView({ status }: { status: TaskStatus }) {
         }
         if (e.key === 'ArrowUp') navigateEl(e.target, Direction.Up);
         if (e.key === 'ArrowDown') navigateEl(e.target, Direction.Down);
+        if (e.key === 'ArrowRight') navigateEl(e.target, Direction.Right);
       },
     }),
     div(
