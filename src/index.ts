@@ -73,6 +73,9 @@ async function handleAudioUpload(files: File[]) {
   redraw();
 }
 
+// START NAVIGATION
+////////////////////////////////////////////////////////////////////////////////
+
 type Coords = { x: number; y: number };
 
 function centerFromRect(rect: DOMRect): Coords {
@@ -291,7 +294,6 @@ function findClosestElementInRowOrColumn(coords: Coords, axis: Axis, group: Elem
       axis === Axis.X
         ? Math.abs(rect.left + rect.width / 2 - coords.x)
         : Math.abs(rect.top + rect.height / 2 - coords.y);
-    console.log('dist', dist, el);
 
     if (dist < distance) {
       distance = dist;
@@ -371,6 +373,9 @@ function navigateEl(el: Element, dir: Direction) {
   if (closest) closest.focus();
 }
 
+// END NAVIGATION
+////////////////////////////////////////////////////////////////////////////////
+
 let styles = {
   task: {
     borderTop: '2px solid transparent',
@@ -442,7 +447,52 @@ enum DragState {
   Bottom,
 }
 
-function sectionHeader({ title, collapsed, oncollapse, onexpand }) {
+// HANDLERS
+////////////////////////////////////////////////////////////////////////////////
+
+function onCreateTask(status: TaskStatus, description: string) {
+  if (!description) return;
+  const time = Date.now();
+  createTask({
+    id: 0,
+    description,
+    status,
+    timeEstimate: DEFAULT_TASK_TIME,
+    timeRemaining: 0,
+    createdAt: time,
+    completedAt: 0,
+    fridx: '',
+  });
+}
+
+const audioDropHandlers = {
+  ondragover: (e) => {
+    // Prevent default to allow drop
+    e.preventDefault();
+    e.dataTransfer!.dropEffect = 'copy';
+  },
+  ondragenter: (e) => {
+    e.preventDefault();
+  },
+  ondrop: (e: DragEvent) => {
+    e.dataTransfer!.dropEffect = 'copy';
+    e.preventDefault();
+    uploadAudioFiles((files) => handleAudioUpload(files))(e);
+  },
+};
+
+function basicKeydownNavigationHandler(e: KeyboardEvent) {
+  console.log('key', e.key);
+  if (e.key === 'ArrowUp') navigateEl(e.target as Element, Direction.Up);
+  if (e.key === 'ArrowDown') navigateEl(e.target as Element, Direction.Down);
+  if (e.key === 'ArrowLeft') navigateEl(e.target as Element, Direction.Left);
+  if (e.key === 'ArrowRight') navigateEl(e.target as Element, Direction.Right);
+}
+
+// VIEWS
+////////////////////////////////////////////////////////////////////////////////
+
+function sectionHeaderView({ title, collapsed, oncollapse, onexpand }) {
   return div(
     {},
     button(
@@ -469,14 +519,6 @@ function sectionHeader({ title, collapsed, oncollapse, onexpand }) {
   );
 }
 
-function basicKeydownNavigationHandler(e: KeyboardEvent) {
-  console.log('key', e.key);
-  if (e.key === 'ArrowUp') navigateEl(e.target as Element, Direction.Up);
-  if (e.key === 'ArrowDown') navigateEl(e.target as Element, Direction.Down);
-  if (e.key === 'ArrowLeft') navigateEl(e.target as Element, Direction.Left);
-  if (e.key === 'ArrowRight') navigateEl(e.target as Element, Direction.Right);
-}
-
 function taskView(
   { task, active = false }: { task: Task; active: boolean },
   { dragState = DragState.None },
@@ -492,11 +534,23 @@ function taskView(
   if (dragState === DragState.Bottom) resolvedStyles = { ...styles.task, ...styles.taskDropBottom };
   if (dragState === DragState.Top) resolvedStyles = { ...styles.task, ...styles.taskDropTop };
 
+  // get human-readable createdAt from task
+  let createdAt = new Date(task.createdAt).toLocaleString();
+  // get number of days since task was created
+  let daysAgo = Math.floor((Date.now() - task.createdAt) / (1000 * 60 * 60 * 24));
+  let daysAgoLabel = daysAgo === 0 ? 'Today' : `${daysAgo} days ago`;
+
   return div(
     {
       id: domId,
       className: 'task',
       style: resolvedStyles,
+      title: `
+createdAt: ${createdAt} - ${daysAgoLabel}
+`,
+      onmouseover: () => {
+        console.log('mouseover', task.id, task);
+      },
       draggable: true,
       ondragover: (e) => {
         e.preventDefault();
@@ -655,22 +709,7 @@ function taskListView(tasks: TaskList) {
   return taskListDiv;
 }
 
-function onCreateTask(status: TaskStatus, description: string) {
-  if (!description) return;
-  const time = Date.now();
-  createTask({
-    id: 0,
-    description,
-    status,
-    timeEstimate: DEFAULT_TASK_TIME,
-    timeRemaining: 0,
-    createdAt: time,
-    completedAt: 0,
-    fridx: '',
-  });
-}
-
-function newTaskInput({ status }: { status: TaskStatus }) {
+function newTaskInputView({ status }: { status: TaskStatus }) {
   return div(
     { class: 'new-task' },
     input({
@@ -709,20 +748,22 @@ function newTaskInput({ status }: { status: TaskStatus }) {
 function sessionTasksView({ sessionTasks }: AppState, { collapsed = false }, update) {
   return div(
     { className: 'session-tasks' },
-    sectionHeader({
+    sectionHeaderView({
       title: 'Session Tasks',
       collapsed,
       oncollapse: () => update({ collapsed: true }),
       onexpand: () => update({ collapsed: false }),
     }),
-    collapsed ? null : [h(taskListView, sessionTasks), h(newTaskInput, { status: TASK_SESSION })],
+    collapsed
+      ? null
+      : [h(taskListView, sessionTasks), h(newTaskInputView, { status: TASK_SESSION })],
   );
 }
 
 function recurringTasksView({ recurringTasks }: AppState, { collapsed = false }, update) {
   return div(
     { className: 'recurring-tasks' },
-    sectionHeader({
+    sectionHeaderView({
       title: 'Recurring Tasks',
       collapsed,
       oncollapse: () => update({ collapsed: true }),
@@ -730,14 +771,14 @@ function recurringTasksView({ recurringTasks }: AppState, { collapsed = false },
     }),
     collapsed
       ? null
-      : [h(taskListView, recurringTasks), h(newTaskInput, { status: TASK_RECURRING })],
+      : [h(taskListView, recurringTasks), h(newTaskInputView, { status: TASK_RECURRING })],
   );
 }
 
 function completedTasksView({ completedTasks }: AppState, { collapsed = true }, update) {
   return div(
     { className: 'completed-tasks' },
-    sectionHeader({
+    sectionHeaderView({
       title: 'Completed Tasks',
       collapsed,
       oncollapse: () => update({ collapsed: true }),
@@ -747,7 +788,7 @@ function completedTasksView({ completedTasks }: AppState, { collapsed = true }, 
   );
 }
 
-function sessionButton({ onclick, label }: { onclick: () => void; label: string }) {
+function sessionButtonView({ onclick, label }: { onclick: () => void; label: string }) {
   return button(
     {
       class: 'session-button navigable',
@@ -758,7 +799,7 @@ function sessionButton({ onclick, label }: { onclick: () => void; label: string 
   );
 }
 
-function pomodoroTimer(
+function pomodoroTimerView(
   { checkpoint, countup, pomodoroDuration, breakDuration, status, speaker }: AppState,
   { renderSignal = 0, prevTimeRemaining = 0 },
   update,
@@ -812,22 +853,6 @@ function pomodoroTimer(
   );
 }
 
-const audioDropHandlers = {
-  ondragover: (e) => {
-    // Prevent default to allow drop
-    e.preventDefault();
-    e.dataTransfer!.dropEffect = 'copy';
-  },
-  ondragenter: (e) => {
-    e.preventDefault();
-  },
-  ondrop: (e: DragEvent) => {
-    e.dataTransfer!.dropEffect = 'copy';
-    e.preventDefault();
-    uploadAudioFiles((files) => handleAudioUpload(files))(e);
-  },
-};
-
 const audioUploadView = (props: AppState) => {
   if (props.audioUploadState === 1) {
     return div(
@@ -867,13 +892,13 @@ const audioUploadView = (props: AppState) => {
   }
 };
 
-function ui(props: AppState) {
+function appView(props: AppState) {
   console.log('ui', appState.tabs);
   if (props.status === APP_IDLE || props.sessionTasks.list.length === 0) {
     return div(
       { className: 'tasks-bar' },
       // props.tabs.map((tab) => p({}, tab)),
-      h(sessionButton, {
+      h(sessionButtonView, {
         onclick: () => {
           playShuffledAudio();
           startSession();
@@ -890,17 +915,17 @@ function ui(props: AppState) {
       { className: 'tasks-bar' },
       div({}, isLeader() ? 'Leader' : 'Follower'),
       // pomodoro timer
-      h(pomodoroTimer, props),
+      h(pomodoroTimerView, props),
       // buttons
       props.status === APP_ACTIVE
-        ? h(sessionButton, {
+        ? h(sessionButtonView, {
             onclick: () => {
               stopMusic();
               breakSession();
             },
             label: 'Take Break',
           })
-        : h(sessionButton, {
+        : h(sessionButtonView, {
             onclick: () => {
               playShuffledAudio();
               resumeSession();
@@ -908,7 +933,7 @@ function ui(props: AppState) {
             label: 'Resume',
           }),
       span({}, ' '),
-      h(sessionButton, {
+      h(sessionButtonView, {
         onclick: () => {
           stopMusic();
           endSession();
@@ -930,12 +955,15 @@ function ui(props: AppState) {
   }
 }
 
+// RENDER
+////////////////////////////////////////////////////////////////////////////////
+
 const root = document.getElementById('app') as DNode;
-render(h(ui, appState), root);
+render(h(appView, appState), root);
 
 function redraw() {
   console.log('redraw');
-  diff(h(ui, appState), root, root._vnode!);
+  diff(h(appView, appState), root, root._vnode!);
 }
 
 callback.onChange = redraw;

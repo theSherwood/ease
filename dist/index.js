@@ -1163,7 +1163,6 @@ function findClosestElementInRowOrColumn(coords, axis, group) {
   for (const el of group) {
     let rect = el.getBoundingClientRect();
     let dist = axis === 0 /* X */ ? Math.abs(rect.left + rect.width / 2 - coords.x) : Math.abs(rect.top + rect.height / 2 - coords.y);
-    console.log("dist", dist, el);
     if (dist < distance) {
       distance = dist;
       closest = el;
@@ -1285,7 +1284,42 @@ function formatTime(time) {
 function padTime(time) {
   return time.toString().padStart(2, "0");
 }
-function sectionHeader({ title, collapsed, oncollapse, onexpand }) {
+function onCreateTask(status, description) {
+  if (!description) return;
+  const time = Date.now();
+  createTask({
+    id: 0,
+    description,
+    status,
+    timeEstimate: DEFAULT_TASK_TIME,
+    timeRemaining: 0,
+    createdAt: time,
+    completedAt: 0,
+    fridx: ""
+  });
+}
+var audioDropHandlers = {
+  ondragover: (e) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+  },
+  ondragenter: (e) => {
+    e.preventDefault();
+  },
+  ondrop: (e) => {
+    e.dataTransfer.dropEffect = "copy";
+    e.preventDefault();
+    uploadAudioFiles((files) => handleAudioUpload(files))(e);
+  }
+};
+function basicKeydownNavigationHandler(e) {
+  console.log("key", e.key);
+  if (e.key === "ArrowUp") navigateEl(e.target, 0 /* Up */);
+  if (e.key === "ArrowDown") navigateEl(e.target, 1 /* Down */);
+  if (e.key === "ArrowLeft") navigateEl(e.target, 2 /* Left */);
+  if (e.key === "ArrowRight") navigateEl(e.target, 3 /* Right */);
+}
+function sectionHeaderView({ title, collapsed, oncollapse, onexpand }) {
   return div(
     {},
     button(
@@ -1311,13 +1345,6 @@ function sectionHeader({ title, collapsed, oncollapse, onexpand }) {
     )
   );
 }
-function basicKeydownNavigationHandler(e) {
-  console.log("key", e.key);
-  if (e.key === "ArrowUp") navigateEl(e.target, 0 /* Up */);
-  if (e.key === "ArrowDown") navigateEl(e.target, 1 /* Down */);
-  if (e.key === "ArrowLeft") navigateEl(e.target, 2 /* Left */);
-  if (e.key === "ArrowRight") navigateEl(e.target, 3 /* Right */);
-}
 function taskView({ task, active = false }, { dragState = 0 /* None */ }, update) {
   function updateTimeEstimate(e) {
     let time = parseHumanReadableTime(e.target.value);
@@ -1327,11 +1354,20 @@ function taskView({ task, active = false }, { dragState = 0 /* None */ }, update
   let resolvedStyles = styles.task;
   if (dragState === 2 /* Bottom */) resolvedStyles = { ...styles.task, ...styles.taskDropBottom };
   if (dragState === 1 /* Top */) resolvedStyles = { ...styles.task, ...styles.taskDropTop };
+  let createdAt = new Date(task.createdAt).toLocaleString();
+  let daysAgo = Math.floor((Date.now() - task.createdAt) / (1e3 * 60 * 60 * 24));
+  let daysAgoLabel = daysAgo === 0 ? "Today" : `${daysAgo} days ago`;
   return div(
     {
       id: domId,
       className: "task",
       style: resolvedStyles,
+      title: `
+createdAt: ${createdAt} - ${daysAgoLabel}
+`,
+      onmouseover: () => {
+        console.log("mouseover", task.id, task);
+      },
       draggable: true,
       ondragover: (e) => {
         e.preventDefault();
@@ -1481,21 +1517,7 @@ function taskListView(tasks) {
   );
   return taskListDiv;
 }
-function onCreateTask(status, description) {
-  if (!description) return;
-  const time = Date.now();
-  createTask({
-    id: 0,
-    description,
-    status,
-    timeEstimate: DEFAULT_TASK_TIME,
-    timeRemaining: 0,
-    createdAt: time,
-    completedAt: 0,
-    fridx: ""
-  });
-}
-function newTaskInput({ status }) {
+function newTaskInputView({ status }) {
   return div(
     { class: "new-task" },
     input({
@@ -1533,31 +1555,31 @@ function newTaskInput({ status }) {
 function sessionTasksView({ sessionTasks: sessionTasks2 }, { collapsed = false }, update) {
   return div(
     { className: "session-tasks" },
-    sectionHeader({
+    sectionHeaderView({
       title: "Session Tasks",
       collapsed,
       oncollapse: () => update({ collapsed: true }),
       onexpand: () => update({ collapsed: false })
     }),
-    collapsed ? null : [h(taskListView, sessionTasks2), h(newTaskInput, { status: TASK_SESSION })]
+    collapsed ? null : [h(taskListView, sessionTasks2), h(newTaskInputView, { status: TASK_SESSION })]
   );
 }
 function recurringTasksView({ recurringTasks: recurringTasks2 }, { collapsed = false }, update) {
   return div(
     { className: "recurring-tasks" },
-    sectionHeader({
+    sectionHeaderView({
       title: "Recurring Tasks",
       collapsed,
       oncollapse: () => update({ collapsed: true }),
       onexpand: () => update({ collapsed: false })
     }),
-    collapsed ? null : [h(taskListView, recurringTasks2), h(newTaskInput, { status: TASK_RECURRING })]
+    collapsed ? null : [h(taskListView, recurringTasks2), h(newTaskInputView, { status: TASK_RECURRING })]
   );
 }
 function completedTasksView({ completedTasks: completedTasks2 }, { collapsed = true }, update) {
   return div(
     { className: "completed-tasks" },
-    sectionHeader({
+    sectionHeaderView({
       title: "Completed Tasks",
       collapsed,
       oncollapse: () => update({ collapsed: true }),
@@ -1566,7 +1588,7 @@ function completedTasksView({ completedTasks: completedTasks2 }, { collapsed = t
     collapsed ? null : h(taskListView, completedTasks2)
   );
 }
-function sessionButton({ onclick, label }) {
+function sessionButtonView({ onclick, label }) {
   return button(
     {
       class: "session-button navigable",
@@ -1576,7 +1598,7 @@ function sessionButton({ onclick, label }) {
     label
   );
 }
-function pomodoroTimer({ checkpoint, countup, pomodoroDuration, breakDuration, status, speaker }, { renderSignal = 0, prevTimeRemaining = 0 }, update) {
+function pomodoroTimerView({ checkpoint, countup, pomodoroDuration, breakDuration, status, speaker }, { renderSignal = 0, prevTimeRemaining = 0 }, update) {
   let now = Date.now();
   let negative = false;
   let duration = status === APP_ACTIVE ? pomodoroDuration : breakDuration;
@@ -1615,20 +1637,6 @@ function pomodoroTimer({ checkpoint, countup, pomodoroDuration, breakDuration, s
     span({ className }, label)
   );
 }
-var audioDropHandlers = {
-  ondragover: (e) => {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = "copy";
-  },
-  ondragenter: (e) => {
-    e.preventDefault();
-  },
-  ondrop: (e) => {
-    e.dataTransfer.dropEffect = "copy";
-    e.preventDefault();
-    uploadAudioFiles((files) => handleAudioUpload(files))(e);
-  }
-};
 var audioUploadView = (props) => {
   if (props.audioUploadState === 1) {
     return div(
@@ -1667,13 +1675,13 @@ var audioUploadView = (props) => {
     );
   }
 };
-function ui(props) {
+function appView(props) {
   console.log("ui", appState.tabs);
   if (props.status === APP_IDLE || props.sessionTasks.list.length === 0) {
     return div(
       { className: "tasks-bar" },
       // props.tabs.map((tab) => p({}, tab)),
-      h(sessionButton, {
+      h(sessionButtonView, {
         onclick: () => {
           playShuffledAudio();
           startSession();
@@ -1690,15 +1698,15 @@ function ui(props) {
       { className: "tasks-bar" },
       div({}, isLeader() ? "Leader" : "Follower"),
       // pomodoro timer
-      h(pomodoroTimer, props),
+      h(pomodoroTimerView, props),
       // buttons
-      props.status === APP_ACTIVE ? h(sessionButton, {
+      props.status === APP_ACTIVE ? h(sessionButtonView, {
         onclick: () => {
           stopMusic();
           breakSession();
         },
         label: "Take Break"
-      }) : h(sessionButton, {
+      }) : h(sessionButtonView, {
         onclick: () => {
           playShuffledAudio();
           resumeSession();
@@ -1706,7 +1714,7 @@ function ui(props) {
         label: "Resume"
       }),
       span({}, " "),
-      h(sessionButton, {
+      h(sessionButtonView, {
         onclick: () => {
           stopMusic();
           endSession();
@@ -1728,10 +1736,10 @@ function ui(props) {
   }
 }
 var root = document.getElementById("app");
-render(h(ui, appState), root);
+render(h(appView, appState), root);
 function redraw() {
   console.log("redraw");
-  diff(h(ui, appState), root, root._vnode);
+  diff(h(appView, appState), root, root._vnode);
 }
 callback.onChange = redraw;
 //# sourceMappingURL=index.js.map
