@@ -56,34 +56,39 @@ function audioBufferToBlob(audioBuffer: AudioBuffer): Blob {
   const numOfChannels = audioBuffer.numberOfChannels;
   const sampleRate = audioBuffer.sampleRate;
   const format = 1; // PCM
-  const bitDepth = 16; // 16-bit audio
+  const bitDepth = 16;
 
   let numOfFrames = audioBuffer.length;
   let buffer = new ArrayBuffer(44 + numOfFrames * numOfChannels * 2);
   let view = new DataView(buffer);
 
-  // WAV HEADER
-  writeString(view, 0, 'RIFF'); // ChunkID
-  view.setUint32(4, 36 + numOfFrames * numOfChannels * 2, true); // ChunkSize
-  writeString(view, 8, 'WAVE'); // Format
-  writeString(view, 12, 'fmt '); // Subchunk1ID
-  view.setUint32(16, 16, true); // Subchunk1Size
-  view.setUint16(20, format, true); // AudioFormat
-  view.setUint16(22, numOfChannels, true); // NumChannels
-  view.setUint32(24, sampleRate, true); // SampleRate
-  view.setUint32(28, sampleRate * numOfChannels * 2, true); // ByteRate
-  view.setUint16(32, numOfChannels * 2, true); // BlockAlign
-  view.setUint16(34, bitDepth, true); // BitsPerSample
-  writeString(view, 36, 'data'); // Subchunk2ID
-  view.setUint32(40, numOfFrames * numOfChannels * 2, true); // Subchunk2Size
+  // WAV HEADER (unchanged)
+  writeString(view, 0, 'RIFF');
+  view.setUint32(4, 36 + numOfFrames * numOfChannels * 2, true);
+  writeString(view, 8, 'WAVE');
+  writeString(view, 12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, format, true);
+  view.setUint16(22, numOfChannels, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * numOfChannels * 2, true);
+  view.setUint16(32, numOfChannels * 2, true);
+  view.setUint16(34, bitDepth, true);
+  writeString(view, 36, 'data');
+  view.setUint32(40, numOfFrames * numOfChannels * 2, true);
 
-  // PCM Data
+  // PCM Data - Properly interleaved
   let offset = 44;
-  for (let channel = 0; channel < numOfChannels; channel++) {
-    let channelData = audioBuffer.getChannelData(channel);
-    for (let i = 0; i < numOfFrames; i++) {
-      let sample = Math.max(-1, Math.min(1, channelData[i])); // Clamp samples to [-1, 1]
-      sample = sample < 0 ? sample * 0x8000 : sample * 0x7fff; // Convert to 16-bit PCM
+  const channels: Float32Array[] = [];
+  for (let i = 0; i < numOfChannels; i++) {
+    channels[i] = audioBuffer.getChannelData(i);
+  }
+
+  // Write interleaved data
+  for (let i = 0; i < numOfFrames; i++) {
+    for (let channel = 0; channel < numOfChannels; channel++) {
+      let sample = Math.max(-1, Math.min(1, channels[channel][i]));
+      sample = sample < 0 ? sample * 0x8000 : sample * 0x7fff;
       view.setInt16(offset, sample, true);
       offset += 2;
     }
