@@ -6,7 +6,7 @@ const watch = process.argv.includes('--watch');
 const config = {
   entryPoints: ['src/index.ts'],
   bundle: true,
-  outdir: 'dist',
+  outdir: 'public/js',
   format: 'esm',
   sourcemap: true,
   platform: 'browser',

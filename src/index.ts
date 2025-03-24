@@ -381,7 +381,7 @@ function navigateEl(el: Element, dir: Direction) {
   let targetCoords = centerFromRect(elBox);
   targetCoords = updateNavigationState(targetCoords, dir);
   let closest = getNearestEl(getNavigableElements, targetCoords, dir);
-  if (closest && closest instanceof Element) closest.focus();
+  if (closest && closest instanceof Element) (closest as any).focus();
 }
 
 {
@@ -397,7 +397,7 @@ function navigateEl(el: Element, dir: Direction) {
           let targetCoords = centerFromRect(lastRect);
           targetCoords = updateNavigationState(targetCoords, Direction.None);
           let closest = getNearestEl(getNavigableElements, targetCoords, Direction.None);
-          if (closest && closest instanceof Element) closest.focus();
+          if (closest && closest instanceof Element) (closest as any).focus();
         }
       }
     }, 0);
