@@ -583,7 +583,9 @@ function onCreateTask(status: TaskStatus, description: string) {
     description,
     status,
     timeEstimate: DEFAULT_TASK_TIME,
-    timeRemaining: 0,
+    timeRemaining: DEFAULT_TASK_TIME,
+    timeElapsed: 0,
+    checkpoint: 0,
     createdAt: time,
     completedAt: 0,
     fridx: '',
@@ -623,7 +625,9 @@ function sessionTaskFromRecurringTask(recurringTask: Task) {
     description,
     status: TASK_SESSION,
     timeEstimate: recurringTask.timeEstimate,
-    timeRemaining: 0,
+    timeRemaining: recurringTask.timeEstimate,
+    timeElapsed: 0,
+    checkpoint: 0,
     createdAt: time,
     completedAt: 0,
     fridx: '',
@@ -662,12 +666,12 @@ function sectionHeaderView({ title, collapsed, oncollapse, onexpand }) {
 
 function taskView(
   { task, active = false }: { task: Task; active: boolean },
-  { dragState = DragState.None },
+  { renderSignal = 0, dragState = DragState.None, activeTaskId = -1 },
   update,
 ) {
   function updateTimeEstimate(e) {
     let time = parseHumanReadableTime(e.target.value);
-    updateTask(task, { timeEstimate: time });
+    updateTask(task, { timeEstimate: time, timeRemaining: time });
   }
   const domId = `task-${task.id}`;
 
@@ -680,6 +684,27 @@ function taskView(
   // get number of days since task was created
   let daysAgo = Math.floor((Date.now() - task.createdAt) / (1000 * 60 * 60 * 24));
   let daysAgoLabel = daysAgo === 0 ? 'Today' : `${daysAgo} days ago`;
+
+  let timeElapsedLabel = '';
+  if (active) {
+    let elapsed = task.timeElapsed || 0;
+    if (task.checkpoint) {
+      let now = Date.now();
+      elapsed += now - task.checkpoint;
+    }
+    let elapsedSeconds = Math.floor(elapsed / 1000);
+    timeElapsedLabel = formatTime(partitionTime(elapsedSeconds), {
+      forceMinutes: true,
+      forceSeconds: true,
+      pad: 2,
+    });
+    timeElapsedLabel += ' / ';
+    setTimeout(() => {
+      if (appState.status !== APP_ACTIVE) return;
+      if (activeTaskId !== task.id && activeTaskId !== -1) return;
+      update({ renderSignal: renderSignal + 1 });
+    }, 400);
+  }
 
   return div(
     {
@@ -762,24 +787,28 @@ ${daysAgoLabel} - ${createdAt}
         }
       },
     }),
-    input({
-      class: 'time-input',
-      value: formatTimestamp(task.timeEstimate),
-      onblur: (e) => {
-        updateTimeEstimate(e);
-      },
-      onkeydown: (e) => {
-        if (e.key === ENTER) updateTimeEstimate(e);
-        if (e.key === ARROW_UP) navigateEl(e.target, Direction.Up);
-        if (e.key === ARROW_DOWN) navigateEl(e.target, Direction.Down);
-        if (e.key === ARROW_LEFT && e.target.selectionStart === 0) {
-          navigateEl(e.target, Direction.Left);
-        }
-        if (e.key === ARROW_RIGHT && e.target.selectionStart === e.target.value.length) {
-          navigateEl(e.target, Direction.Right);
-        }
-      },
-    }),
+    div(
+      {},
+      ...(active ? [span({}, timeElapsedLabel)] : []),
+      input({
+        class: 'time-input',
+        value: formatTimestamp(task.timeRemaining),
+        onblur: (e) => {
+          updateTimeEstimate(e);
+        },
+        onkeydown: (e) => {
+          if (e.key === ENTER) updateTimeEstimate(e);
+          if (e.key === ARROW_UP) navigateEl(e.target, Direction.Up);
+          if (e.key === ARROW_DOWN) navigateEl(e.target, Direction.Down);
+          if (e.key === ARROW_LEFT && e.target.selectionStart === 0) {
+            navigateEl(e.target, Direction.Left);
+          }
+          if (e.key === ARROW_RIGHT && e.target.selectionStart === e.target.value.length) {
+            navigateEl(e.target, Direction.Right);
+          }
+        },
+      }),
+    ),
     div(
       {},
       active &&

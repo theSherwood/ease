@@ -15,6 +15,8 @@ export type Task = {
   status: TaskStatus;
   timeEstimate: number;
   timeRemaining: number;
+  timeElapsed: number;
+  checkpoint: number;
   createdAt: number;
   completedAt: number;
   fridx: string;

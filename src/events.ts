@@ -65,6 +65,12 @@ channel.addEventListener('message', async (e) => {
   if (data.type === 'sessionChange') {
     appState.leader = sender;
     await readFromLocalStorage();
+    // Refresh active task
+    let activeTask = sessionTasks.list[0];
+    if (activeTask) {
+      activeTask = (await taskStore.get(activeTask.id)) as Task;
+      addTaskToLists(activeTask);
+    }
     callback.onChange();
   }
   if (data.type === 'updateTask') {
@@ -107,18 +113,38 @@ export async function setBreakDuration(duration: number) {
   await broadcastSessionChange();
 }
 
+function getActiveTask() {
+  return sessionTasks.list[0];
+}
+
 export async function startSession() {
   appState.status = APP_ACTIVE;
   appState.sessionId = getSessionId();
   appState.checkpoint = Date.now();
+
+  let activeTask = getActiveTask();
+  if (activeTask) {
+    activeTask.checkpoint = appState.checkpoint;
+    await taskStore.upsert(activeTask);
+  }
+
   await broadcastSessionChange();
 }
 
 export async function breakSession() {
+  const now = Date.now();
   const checkpoint = appState.checkpoint;
   const status = appState.status;
   appState.status = APP_BREAK;
-  appState.checkpoint = Date.now();
+  appState.checkpoint = now;
+
+  let activeTask = getActiveTask();
+  if (activeTask) {
+    activeTask.timeElapsed = (activeTask.timeElapsed || 0) + now - (activeTask.checkpoint || 0);
+    activeTask.checkpoint = 0;
+    await taskStore.upsert(activeTask);
+  }
+
   await broadcastSessionChange();
   await sessionSegmentStore.add({
     sessionId: appState.sessionId,
@@ -131,6 +157,13 @@ export async function resumeSession() {
   const checkpoint = appState.checkpoint;
   appState.status = APP_ACTIVE;
   appState.checkpoint = Date.now();
+
+  let activeTask = getActiveTask();
+  if (activeTask) {
+    activeTask.checkpoint = appState.checkpoint;
+    await taskStore.upsert(activeTask);
+  }
+
   await broadcastSessionChange();
   await sessionSegmentStore.add({
     sessionId: appState.sessionId,
@@ -140,11 +173,24 @@ export async function resumeSession() {
   });
 }
 export async function endSession() {
+  const now = Date.now();
   const checkpoint = appState.checkpoint;
   const sessionId = appState.sessionId;
   appState.status = APP_IDLE;
   appState.sessionId = SESSION_ID_DEFAULT;
   appState.checkpoint = 0;
+
+  let activeTask = getActiveTask();
+  if (activeTask) {
+    let elapsed = (activeTask.timeElapsed || 0) + now - (activeTask.checkpoint || 0);
+    activeTask.timeRemaining = Math.floor(
+      Math.max(0, activeTask.timeRemaining * 1000 - elapsed) / 1000,
+    );
+    activeTask.timeElapsed = 0;
+    activeTask.checkpoint = 0;
+    await taskStore.upsert(activeTask);
+  }
+
   await broadcastSessionChange();
   await sessionSegmentStore.add({
     sessionId: sessionId,

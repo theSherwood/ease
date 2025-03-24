@@ -606,8 +606,8 @@ function readEntries(reader) {
 }
 
 // src/state.ts
-var POMODORO_DURATION_DEFAULT = 5;
-var BREAK_DURATION_DEFAULT = 5;
+var POMODORO_DURATION_DEFAULT = 25 * 60;
+var BREAK_DURATION_DEFAULT = 5 * 60;
 var COUNTUP_DEFAULT = false;
 var SPEAKER_DEFAULT = "rick_sanchez";
 var SESSION_ID_DEFAULT = -1;
@@ -702,6 +702,11 @@ channel.addEventListener("message", async (e) => {
   if (data.type === "sessionChange") {
     appState.leader = sender;
     await readFromLocalStorage();
+    let activeTask = sessionTasks.list[0];
+    if (activeTask) {
+      activeTask = await taskStore.get(activeTask.id);
+      addTaskToLists(activeTask);
+    }
     callback.onChange();
   }
   if (data.type === "updateTask") {
@@ -738,17 +743,32 @@ async function setBreakDuration(duration) {
   appState.breakDuration = duration;
   await broadcastSessionChange();
 }
+function getActiveTask() {
+  return sessionTasks.list[0];
+}
 async function startSession() {
   appState.status = APP_ACTIVE;
   appState.sessionId = getSessionId();
   appState.checkpoint = Date.now();
+  let activeTask = getActiveTask();
+  if (activeTask) {
+    activeTask.checkpoint = appState.checkpoint;
+    await taskStore.upsert(activeTask);
+  }
   await broadcastSessionChange();
 }
 async function breakSession() {
+  const now = Date.now();
   const checkpoint = appState.checkpoint;
   const status = appState.status;
   appState.status = APP_BREAK;
-  appState.checkpoint = Date.now();
+  appState.checkpoint = now;
+  let activeTask = getActiveTask();
+  if (activeTask) {
+    activeTask.timeElapsed = (activeTask.timeElapsed || 0) + now - (activeTask.checkpoint || 0);
+    activeTask.checkpoint = 0;
+    await taskStore.upsert(activeTask);
+  }
   await broadcastSessionChange();
   await sessionSegmentStore.add({
     sessionId: appState.sessionId,
@@ -761,6 +781,11 @@ async function resumeSession() {
   const checkpoint = appState.checkpoint;
   appState.status = APP_ACTIVE;
   appState.checkpoint = Date.now();
+  let activeTask = getActiveTask();
+  if (activeTask) {
+    activeTask.checkpoint = appState.checkpoint;
+    await taskStore.upsert(activeTask);
+  }
   await broadcastSessionChange();
   await sessionSegmentStore.add({
     sessionId: appState.sessionId,
@@ -770,11 +795,22 @@ async function resumeSession() {
   });
 }
 async function endSession() {
+  const now = Date.now();
   const checkpoint = appState.checkpoint;
   const sessionId = appState.sessionId;
   appState.status = APP_IDLE;
   appState.sessionId = SESSION_ID_DEFAULT;
   appState.checkpoint = 0;
+  let activeTask = getActiveTask();
+  if (activeTask) {
+    let elapsed = (activeTask.timeElapsed || 0) + now - (activeTask.checkpoint || 0);
+    activeTask.timeRemaining = Math.floor(
+      Math.max(0, activeTask.timeRemaining * 1e3 - elapsed) / 1e3
+    );
+    activeTask.timeElapsed = 0;
+    activeTask.checkpoint = 0;
+    await taskStore.upsert(activeTask);
+  }
   await broadcastSessionChange();
   await sessionSegmentStore.add({
     sessionId,
@@ -1395,7 +1431,9 @@ function onCreateTask(status, description) {
     description,
     status,
     timeEstimate: DEFAULT_TASK_TIME,
-    timeRemaining: 0,
+    timeRemaining: DEFAULT_TASK_TIME,
+    timeElapsed: 0,
+    checkpoint: 0,
     createdAt: time,
     completedAt: 0,
     fridx: ""
@@ -1431,7 +1469,9 @@ function sessionTaskFromRecurringTask(recurringTask) {
     description,
     status: TASK_SESSION,
     timeEstimate: recurringTask.timeEstimate,
-    timeRemaining: 0,
+    timeRemaining: recurringTask.timeEstimate,
+    timeElapsed: 0,
+    checkpoint: 0,
     createdAt: time,
     completedAt: 0,
     fridx: ""
@@ -1463,10 +1503,10 @@ function sectionHeaderView({ title, collapsed, oncollapse, onexpand }) {
     )
   );
 }
-function taskView({ task, active = false }, { dragState = 0 /* None */ }, update) {
+function taskView({ task, active = false }, { renderSignal = 0, dragState = 0 /* None */, activeTaskId = -1 }, update) {
   function updateTimeEstimate(e) {
     let time = parseHumanReadableTime(e.target.value);
-    updateTask(task, { timeEstimate: time });
+    updateTask(task, { timeEstimate: time, timeRemaining: time });
   }
   const domId = `task-${task.id}`;
   let resolvedStyles = styles.task;
@@ -1475,6 +1515,26 @@ function taskView({ task, active = false }, { dragState = 0 /* None */ }, update
   let createdAt = new Date(task.createdAt).toLocaleString();
   let daysAgo = Math.floor((Date.now() - task.createdAt) / (1e3 * 60 * 60 * 24));
   let daysAgoLabel = daysAgo === 0 ? "Today" : `${daysAgo} days ago`;
+  let timeElapsedLabel = "";
+  if (active) {
+    let elapsed = task.timeElapsed || 0;
+    if (task.checkpoint) {
+      let now = Date.now();
+      elapsed += now - task.checkpoint;
+    }
+    let elapsedSeconds = Math.floor(elapsed / 1e3);
+    timeElapsedLabel = formatTime(partitionTime(elapsedSeconds), {
+      forceMinutes: true,
+      forceSeconds: true,
+      pad: 2
+    });
+    timeElapsedLabel += " / ";
+    setTimeout(() => {
+      if (appState.status !== APP_ACTIVE) return;
+      if (activeTaskId !== task.id && activeTaskId !== -1) return;
+      update({ renderSignal: renderSignal + 1 });
+    }, 400);
+  }
   return div(
     {
       id: domId,
@@ -1553,24 +1613,28 @@ ${daysAgoLabel} - ${createdAt}
         }
       }
     }),
-    input({
-      class: "time-input",
-      value: formatTimestamp(task.timeEstimate),
-      onblur: (e) => {
-        updateTimeEstimate(e);
-      },
-      onkeydown: (e) => {
-        if (e.key === ENTER) updateTimeEstimate(e);
-        if (e.key === ARROW_UP) navigateEl(e.target, 0 /* Up */);
-        if (e.key === ARROW_DOWN) navigateEl(e.target, 1 /* Down */);
-        if (e.key === ARROW_LEFT && e.target.selectionStart === 0) {
-          navigateEl(e.target, 2 /* Left */);
+    div(
+      {},
+      ...active ? [span({}, timeElapsedLabel)] : [],
+      input({
+        class: "time-input",
+        value: formatTimestamp(task.timeRemaining),
+        onblur: (e) => {
+          updateTimeEstimate(e);
+        },
+        onkeydown: (e) => {
+          if (e.key === ENTER) updateTimeEstimate(e);
+          if (e.key === ARROW_UP) navigateEl(e.target, 0 /* Up */);
+          if (e.key === ARROW_DOWN) navigateEl(e.target, 1 /* Down */);
+          if (e.key === ARROW_LEFT && e.target.selectionStart === 0) {
+            navigateEl(e.target, 2 /* Left */);
+          }
+          if (e.key === ARROW_RIGHT && e.target.selectionStart === e.target.value.length) {
+            navigateEl(e.target, 3 /* Right */);
+          }
         }
-        if (e.key === ARROW_RIGHT && e.target.selectionStart === e.target.value.length) {
-          navigateEl(e.target, 3 /* Right */);
-        }
-      }
-    }),
+      })
+    ),
     div(
       {},
       active && button(

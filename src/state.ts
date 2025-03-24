@@ -1,9 +1,9 @@
 import { APP_IDLE, AppState, AppStatus, TaskList } from './types';
 
-// const POMODORO_DURATION_DEFAULT = 25 * 60;
-const POMODORO_DURATION_DEFAULT = 5;
-// const BREAK_DURATION_DEFAULT = 5 * 60;
-const BREAK_DURATION_DEFAULT = 5;
+const POMODORO_DURATION_DEFAULT = 25 * 60;
+// const POMODORO_DURATION_DEFAULT = 5;
+const BREAK_DURATION_DEFAULT = 5 * 60;
+// const BREAK_DURATION_DEFAULT = 5;
 const COUNTUP_DEFAULT = false;
 // const SPEAKER_DEFAULT = 'johnny_cash';
 const SPEAKER_DEFAULT = 'rick_sanchez';
