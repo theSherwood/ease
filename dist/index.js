@@ -484,10 +484,13 @@ function audioBufferToBlob(audioBuffer) {
   writeString(view, 36, "data");
   view.setUint32(40, numOfFrames * numOfChannels * 2, true);
   let offset = 44;
-  for (let channel2 = 0; channel2 < numOfChannels; channel2++) {
-    let channelData = audioBuffer.getChannelData(channel2);
-    for (let i = 0; i < numOfFrames; i++) {
-      let sample = Math.max(-1, Math.min(1, channelData[i]));
+  const channels = [];
+  for (let i = 0; i < numOfChannels; i++) {
+    channels[i] = audioBuffer.getChannelData(i);
+  }
+  for (let i = 0; i < numOfFrames; i++) {
+    for (let channel2 = 0; channel2 < numOfChannels; channel2++) {
+      let sample = Math.max(-1, Math.min(1, channels[channel2][i]));
       sample = sample < 0 ? sample * 32768 : sample * 32767;
       view.setInt16(offset, sample, true);
       offset += 2;
@@ -628,6 +631,7 @@ var appState = {
   speaker: "",
   // Local state
   audioUploadState: 1,
+  draggingFile: false,
   // Task data
   sessionTasks,
   recurringTasks,
@@ -893,7 +897,7 @@ function Fragment(props) {
   return props.children;
 }
 function render(newVNode, dom2, oldVNode = dom2._vnode || (dom2._vnode = {})) {
-  return diff(h(Fragment, {}, [newVNode]), dom2, oldVNode);
+  return diff(h(Fragment, {}, newVNode), dom2, oldVNode);
 }
 function diff(newVNode, dom2, oldVNode, currentChildIndex = -1) {
   if (Array.isArray(newVNode)) {
@@ -1036,6 +1040,12 @@ function resetNavState() {
   lastAxis = 2 /* None */;
 }
 {
+  let endDragFile = function() {
+    if (appState.draggingFile) {
+      appState.draggingFile = false;
+      redraw();
+    }
+  };
   let container = document;
   container.addEventListener("focusin", (event) => {
     if (event.target instanceof Element) lastRect = event.target.getBoundingClientRect();
@@ -1060,6 +1070,45 @@ function resetNavState() {
   });
   container.addEventListener("mousedown", (e) => {
     resetNavState();
+  });
+  window.addEventListener("dragstart", (e) => {
+    e.preventDefault();
+  });
+  window.addEventListener("dragenter", (e) => {
+    e.preventDefault();
+  });
+  window.addEventListener("dragover", (e) => {
+    var _a, _b;
+    e.preventDefault();
+    let isFile = false;
+    if ((_a = e.dataTransfer) == null ? void 0 : _a.items) {
+      for (let i = 0; i < e.dataTransfer.items.length; i++) {
+        if (e.dataTransfer.items[i].kind === "file") isFile = true;
+      }
+    } else {
+      if ((((_b = e.dataTransfer) == null ? void 0 : _b.files.length) || 0) > 0) {
+        isFile = true;
+      }
+    }
+    if (isFile && !appState.draggingFile) {
+      appState.draggingFile = true;
+      redraw();
+    }
+    console.log("isFile", isFile);
+  });
+  window.addEventListener("drop", (e) => {
+    e.preventDefault();
+    endDragFile();
+  });
+  window.addEventListener("dragend", (e) => {
+    e.preventDefault();
+    endDragFile();
+  });
+  window.addEventListener("dragleave", (e) => {
+    if (e.clientX <= 0 || e.clientY <= 0 || e.clientX >= window.innerWidth || e.clientY >= window.innerHeight) {
+      e.preventDefault();
+      endDragFile();
+    }
   });
 }
 function groupElementsByRow(getElementCandidates) {
@@ -1745,11 +1794,13 @@ function pomodoroTimerView({ checkpoint, countup, pomodoroDuration, breakDuratio
     })
   );
 }
-var audioUploadView = (props) => {
+var audioView = (props) => {
   if (props.audioUploadState === 1) {
+    let className = "audio-controls";
+    if (props.draggingFile) className += " dragging-file";
     return div(
       {
-        className: "audio-controls",
+        className,
         ...audioDropHandlers
       },
       h("label", { for: "audio-upload" }, "Upload Audio"),
@@ -1799,7 +1850,7 @@ function appView(props) {
       h(sessionTasksView, { key: "session", ...props }),
       h(recurringTasksView, { key: "recurring", ...props }),
       h(completedTasksView, { key: "completed", ...props }),
-      h(audioUploadView, props)
+      h(audioView, props)
     );
   } else {
     return div(
@@ -1839,7 +1890,7 @@ function appView(props) {
       }),
       h(recurringTasksView, { key: "recurring", ...props }),
       h(completedTasksView, { key: "completed", ...props }),
-      h(audioUploadView, props)
+      h(audioView, props)
     );
   }
 }

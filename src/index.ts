@@ -148,6 +148,57 @@ function resetNavState() {
   container.addEventListener('mousedown', (e) => {
     resetNavState();
   });
+  window.addEventListener('dragstart', (e) => {
+    e.preventDefault();
+  });
+  window.addEventListener('dragenter', (e) => {
+    e.preventDefault();
+  });
+  window.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    let isFile = false;
+    if (e.dataTransfer?.items) {
+      for (let i = 0; i < e.dataTransfer.items.length; i++) {
+        if (e.dataTransfer.items[i].kind === 'file') isFile = true;
+      }
+    } else {
+      // Fallback for older browsers
+      if ((e.dataTransfer?.files.length || 0) > 0) {
+        isFile = true;
+      }
+    }
+    if (isFile && !appState.draggingFile) {
+      appState.draggingFile = true;
+      redraw();
+    }
+    console.log('isFile', isFile);
+  });
+  function endDragFile() {
+    if (appState.draggingFile) {
+      appState.draggingFile = false;
+      redraw();
+    }
+  }
+  window.addEventListener('drop', (e) => {
+    e.preventDefault();
+    endDragFile();
+  });
+  window.addEventListener('dragend', (e) => {
+    e.preventDefault();
+    endDragFile();
+  });
+  window.addEventListener('dragleave', (e) => {
+    // Detect when the drag leaves the window
+    if (
+      e.clientX <= 0 ||
+      e.clientY <= 0 ||
+      e.clientX >= window.innerWidth ||
+      e.clientY >= window.innerHeight
+    ) {
+      e.preventDefault();
+      endDragFile();
+    }
+  });
 }
 
 function groupElementsByRow(getElementCandidates: () => Element[]) {
@@ -983,11 +1034,13 @@ function pomodoroTimerView(
   );
 }
 
-const audioUploadView = (props: AppState) => {
+const audioView = (props: AppState) => {
   if (props.audioUploadState === 1) {
+    let className = 'audio-controls';
+    if (props.draggingFile) className += ' dragging-file';
     return div(
       {
-        className: 'audio-controls',
+        className,
         ...audioDropHandlers,
       },
       h('label', { for: 'audio-upload' }, 'Upload Audio'),
@@ -1038,7 +1091,7 @@ function appView(props: AppState) {
       h(sessionTasksView, { key: 'session', ...props }),
       h(recurringTasksView, { key: 'recurring', ...props }),
       h(completedTasksView, { key: 'completed', ...props }),
-      h(audioUploadView, props),
+      h(audioView, props),
     );
   } else {
     return div(
@@ -1080,7 +1133,7 @@ function appView(props: AppState) {
       }),
       h(recurringTasksView, { key: 'recurring', ...props }),
       h(completedTasksView, { key: 'completed', ...props }),
-      h(audioUploadView, props),
+      h(audioView, props),
     );
   }
 }

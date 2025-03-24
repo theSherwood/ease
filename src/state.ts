@@ -33,6 +33,7 @@ export const appState: AppState = {
 
   // Local state
   audioUploadState: 1,
+  draggingFile: false,
 
   // Task data
   sessionTasks,

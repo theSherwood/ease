@@ -64,6 +64,7 @@ export type AppState = {
   speaker: string;
 
   audioUploadState: number;
+  draggingFile: boolean;
 
   sessionTasks: TaskList;
   recurringTasks: TaskList;

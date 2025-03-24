@@ -10,6 +10,7 @@
         --bg-task: #fff8ef;
         --bg-danger: #ff9178;
         --accent: #e67550;
+        --accent-muted: #f7c9b7;
         --text: #2c2420;
         --text-muted: #8a817c;
         --border: #d4ccc7;
@@ -147,6 +148,11 @@
         gap: 1rem;
         align-items: center;
         border-top: 1px solid var(--border);
+      }
+
+      .audio-controls.dragging-file {
+        background: var(--accent-muted);
+        transition: background 0.2s ease;
       }
 
       .audio-controls .progress {

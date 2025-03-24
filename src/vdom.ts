@@ -33,7 +33,7 @@ export function render(
   dom: DNode,
   oldVNode = dom._vnode || (dom._vnode = {} as VNode),
 ) {
-  return diff(h(Fragment, {}, [newVNode]), dom, oldVNode);
+  return diff(h(Fragment, {}, newVNode), dom, oldVNode);
 }
 
 export function diff(newVNode: VNode, dom: DNode, oldVNode: VNode, currentChildIndex = -1) {
