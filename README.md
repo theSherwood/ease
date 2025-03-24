@@ -21,4 +21,6 @@ npm run build
 - [x] tooltips that show how long a task has been present
 - [ ] collect session stats
 - [ ] view session stats
+- [ ] add drop indicator
+- [ ] setup github pages
 - [x] animate progress bar

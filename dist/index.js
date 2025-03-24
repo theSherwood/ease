@@ -1265,6 +1265,12 @@ function navigateEl(el, dir) {
   let closest = getNearestEl(getNavigableElements, targetCoords, dir);
   if (closest) closest.focus();
 }
+var SPACE = " ";
+var ENTER = "Enter";
+var ARROW_UP = "ArrowUp";
+var ARROW_DOWN = "ArrowDown";
+var ARROW_LEFT = "ArrowLeft";
+var ARROW_RIGHT = "ArrowRight";
 var styles = {
   task: {
     borderTop: "2px solid transparent",
@@ -1361,10 +1367,25 @@ var audioDropHandlers = {
 };
 function basicKeydownNavigationHandler(e) {
   console.log("key", e.key);
-  if (e.key === "ArrowUp") navigateEl(e.target, 0 /* Up */);
-  if (e.key === "ArrowDown") navigateEl(e.target, 1 /* Down */);
-  if (e.key === "ArrowLeft") navigateEl(e.target, 2 /* Left */);
-  if (e.key === "ArrowRight") navigateEl(e.target, 3 /* Right */);
+  if (e.key === ARROW_UP) navigateEl(e.target, 0 /* Up */);
+  if (e.key === ARROW_DOWN) navigateEl(e.target, 1 /* Down */);
+  if (e.key === ARROW_LEFT) navigateEl(e.target, 2 /* Left */);
+  if (e.key === ARROW_RIGHT) navigateEl(e.target, 3 /* Right */);
+}
+function sessionTaskFromRecurringTask(recurringTask) {
+  let description = recurringTask.description;
+  if (!description) return;
+  const time = Date.now();
+  createTask({
+    id: 0,
+    description,
+    status: TASK_SESSION,
+    timeEstimate: recurringTask.timeEstimate,
+    timeRemaining: 0,
+    createdAt: time,
+    completedAt: 0,
+    fridx: ""
+  });
 }
 function sectionHeaderView({ title, collapsed, oncollapse, onexpand }) {
   return div(
@@ -1381,10 +1402,10 @@ function sectionHeaderView({ title, collapsed, oncollapse, onexpand }) {
         },
         onkeydown: (e) => {
           console.log("key", e.key);
-          if (e.key === "ArrowLeft") oncollapse();
-          if (e.key === "ArrowRight") onexpand();
-          if (e.key === "ArrowUp") navigateEl(e.target, 0 /* Up */);
-          if (e.key === "ArrowDown") navigateEl(e.target, 1 /* Down */);
+          if (e.key === ARROW_LEFT) oncollapse();
+          if (e.key === ARROW_RIGHT) onexpand();
+          if (e.key === ARROW_UP) navigateEl(e.target, 0 /* Up */);
+          if (e.key === ARROW_DOWN) navigateEl(e.target, 1 /* Down */);
         }
       },
       div({ class: "collapse-icon" }, collapsed ? "\u25B8" : "\u25BE"),
@@ -1474,9 +1495,9 @@ ${daysAgoLabel} - ${createdAt}
       },
       onkeydown: (e) => {
         console.log("key", e.key);
-        if (e.key === "ArrowUp") navigateEl(e.target, 0 /* Up */);
-        if (e.key === "ArrowDown") navigateEl(e.target, 1 /* Down */);
-        if (e.key === "ArrowRight" && e.target.selectionStart === e.target.value.length) {
+        if (e.key === ARROW_UP) navigateEl(e.target, 0 /* Up */);
+        if (e.key === ARROW_DOWN) navigateEl(e.target, 1 /* Down */);
+        if (e.key === ARROW_RIGHT && e.target.selectionStart === e.target.value.length) {
           navigateEl(e.target, 3 /* Right */);
         }
       }
@@ -1488,15 +1509,13 @@ ${daysAgoLabel} - ${createdAt}
         updateTimeEstimate(e);
       },
       onkeydown: (e) => {
-        if (e.key === "Enter") updateTimeEstimate(e);
-        if (e.key === "ArrowUp") navigateEl(e.target, 0 /* Up */);
-        if (e.key === "ArrowDown") navigateEl(e.target, 1 /* Down */);
-        if (e.key === "ArrowLeft" && e.target.selectionStart === 0) {
-          console.log("left");
+        if (e.key === ENTER) updateTimeEstimate(e);
+        if (e.key === ARROW_UP) navigateEl(e.target, 0 /* Up */);
+        if (e.key === ARROW_DOWN) navigateEl(e.target, 1 /* Down */);
+        if (e.key === ARROW_LEFT && e.target.selectionStart === 0) {
           navigateEl(e.target, 2 /* Left */);
         }
-        if (e.key === "ArrowRight" && e.target.selectionStart === e.target.value.length) {
-          console.log("right");
+        if (e.key === ARROW_RIGHT && e.target.selectionStart === e.target.value.length) {
           navigateEl(e.target, 3 /* Right */);
         }
       }
@@ -1506,7 +1525,12 @@ ${daysAgoLabel} - ${createdAt}
       active && button(
         {
           class: "navigable",
-          onkeydown: basicKeydownNavigationHandler,
+          onkeydown: (e) => {
+            if (e.key === SPACE || e.key === ENTER) {
+              e.preventDefault();
+              updateTask(task, { status: TASK_COMPLETED });
+            } else basicKeydownNavigationHandler(e);
+          },
           onclick: () => updateTask(task, { status: TASK_COMPLETED })
         },
         "\u2713"
@@ -1514,21 +1538,14 @@ ${daysAgoLabel} - ${createdAt}
       task.status === TASK_RECURRING && button(
         {
           class: "navigable",
-          onkeydown: basicKeydownNavigationHandler,
+          onkeydown: (e) => {
+            if (e.key === SPACE || e.key === ENTER) {
+              e.preventDefault();
+              sessionTaskFromRecurringTask(task);
+            } else basicKeydownNavigationHandler(e);
+          },
           onclick: () => {
-            let description = task.description;
-            if (!description) return;
-            const time = Date.now();
-            createTask({
-              id: 0,
-              description,
-              status: TASK_SESSION,
-              timeEstimate: task.timeEstimate,
-              timeRemaining: 0,
-              createdAt: time,
-              completedAt: 0,
-              fridx: ""
-            });
+            sessionTaskFromRecurringTask(task);
           }
         },
         "+"
@@ -1536,7 +1553,12 @@ ${daysAgoLabel} - ${createdAt}
       button(
         {
           class: "delete-button navigable",
-          onkeydown: basicKeydownNavigationHandler,
+          onkeydown: (e) => {
+            if (e.key === SPACE || e.key === ENTER) {
+              e.preventDefault();
+              deleteTask(task);
+            } else basicKeydownNavigationHandler(e);
+          },
           onclick: () => deleteTask(task)
         },
         "\u2715"
@@ -1562,19 +1584,28 @@ function taskListView(tasks) {
   return taskListDiv;
 }
 function newTaskInputView({ status }) {
+  const inputId = Math.random().toString();
+  function createNewTaskFromInput() {
+    let inputEl = document.getElementById(inputId);
+    let value = inputEl.value;
+    if (!value) return;
+    onCreateTask(status, value);
+    inputEl.value = "";
+  }
   return div(
     { class: "new-task" },
     input({
+      id: inputId,
       type: "text",
       placeholder: "Add a task",
       onkeydown: (e) => {
-        if (e.key === "Enter") {
+        if (e.key === ENTER) {
           onCreateTask(status, e.target.value);
           e.target.value = "";
         }
-        if (e.key === "ArrowUp") navigateEl(e.target, 0 /* Up */);
-        if (e.key === "ArrowDown") navigateEl(e.target, 1 /* Down */);
-        if (e.key === "ArrowRight") navigateEl(e.target, 3 /* Right */);
+        if (e.key === ARROW_UP) navigateEl(e.target, 0 /* Up */);
+        if (e.key === ARROW_DOWN) navigateEl(e.target, 1 /* Down */);
+        if (e.key === ARROW_RIGHT) navigateEl(e.target, 3 /* Right */);
       }
     }),
     div(
@@ -1583,17 +1614,19 @@ function newTaskInputView({ status }) {
         {
           class: "square-button navigable",
           onclick: (e) => {
-            let inputEl = e.target.previousElementSibling;
-            let value = inputEl.value;
-            if (!value) return;
-            onCreateTask(status, value);
-            inputEl.value = "";
+            createNewTaskFromInput();
           },
-          onkeydown: basicKeydownNavigationHandler
+          onkeydown: (e) => {
+            if (e.key === SPACE || e.key === ENTER) {
+              e.preventDefault();
+              createNewTaskFromInput();
+            } else {
+              basicKeydownNavigationHandler(e);
+            }
+          }
         },
         "+"
-      ),
-      span({ class: "square-button" }, "")
+      )
     )
   );
 }
@@ -1705,9 +1738,9 @@ function pomodoroTimerView({ checkpoint, countup, pomodoroDuration, breakDuratio
         if (editing) updateTimerFromInput(e);
       },
       onkeydown: (e) => {
-        if (e.key === "Enter" && editing) updateTimerFromInput(e);
-        if (e.key === "ArrowUp") navigateEl(e.target, 0 /* Up */);
-        if (e.key === "ArrowDown") navigateEl(e.target, 1 /* Down */);
+        if (e.key === ENTER && editing) updateTimerFromInput(e);
+        if (e.key === ARROW_UP) navigateEl(e.target, 0 /* Up */);
+        if (e.key === ARROW_DOWN) navigateEl(e.target, 1 /* Down */);
       }
     })
   );
@@ -1771,7 +1804,7 @@ function appView(props) {
   } else {
     return div(
       { className: "tasks-bar" },
-      div({}, isLeader() ? "Leader" : "Follower"),
+      // div({}, isLeader() ? 'Leader' : 'Follower'),
       // pomodoro timer
       h(pomodoroTimerView, props),
       // buttons
