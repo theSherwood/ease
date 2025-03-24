@@ -16,9 +16,9 @@ npm run build
 - [x] edit session time
 - [x] edit break time
 - [x] prevent file drop in tasks
-- [ ] update time of active task
-  - [ ] view
-  - [ ] update state
+- [x] update time of active task
+  - [x] view
+  - [x] update state
 - [x] tooltips that show how long a task has been present
 - [ ] collect session stats
 - [ ] view session stats
