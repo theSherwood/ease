@@ -1039,78 +1039,6 @@ function resetNavState() {
   lastDirection = 4 /* None */;
   lastAxis = 2 /* None */;
 }
-{
-  let endDragFile = function() {
-    if (appState.draggingFile) {
-      appState.draggingFile = false;
-      redraw();
-    }
-  };
-  let container = document;
-  container.addEventListener("focusin", (event) => {
-    if (event.target instanceof Element) lastRect = event.target.getBoundingClientRect();
-  });
-  container.addEventListener("focusout", () => {
-    setTimeout(() => {
-      if (!container.contains(document.activeElement) || document.activeElement === document.body) {
-        resetNavState();
-        if (lastRect) {
-          let targetCoords = centerFromRect(lastRect);
-          targetCoords = updateNavigationState(targetCoords, 4 /* None */);
-          let closest = getNearestEl(getNavigableElements, targetCoords, 4 /* None */);
-          if (closest) closest.focus();
-        }
-      }
-    }, 0);
-  });
-  container.addEventListener("keydown", (e) => {
-    if (e.key === "Tab") {
-      resetNavState();
-    }
-  });
-  container.addEventListener("mousedown", (e) => {
-    resetNavState();
-  });
-  window.addEventListener("dragstart", (e) => {
-    e.preventDefault();
-  });
-  window.addEventListener("dragenter", (e) => {
-    e.preventDefault();
-  });
-  window.addEventListener("dragover", (e) => {
-    var _a, _b;
-    e.preventDefault();
-    let isFile = false;
-    if ((_a = e.dataTransfer) == null ? void 0 : _a.items) {
-      for (let i = 0; i < e.dataTransfer.items.length; i++) {
-        if (e.dataTransfer.items[i].kind === "file") isFile = true;
-      }
-    } else {
-      if ((((_b = e.dataTransfer) == null ? void 0 : _b.files.length) || 0) > 0) {
-        isFile = true;
-      }
-    }
-    if (isFile && !appState.draggingFile) {
-      appState.draggingFile = true;
-      redraw();
-    }
-    console.log("isFile", isFile);
-  });
-  window.addEventListener("drop", (e) => {
-    e.preventDefault();
-    endDragFile();
-  });
-  window.addEventListener("dragend", (e) => {
-    e.preventDefault();
-    endDragFile();
-  });
-  window.addEventListener("dragleave", (e) => {
-    if (e.clientX <= 0 || e.clientY <= 0 || e.clientX >= window.innerWidth || e.clientY >= window.innerHeight) {
-      e.preventDefault();
-      endDragFile();
-    }
-  });
-}
 function groupElementsByRow(getElementCandidates) {
   const elements = getElementCandidates();
   if (elements.length === 0) return [];
@@ -1312,7 +1240,67 @@ function navigateEl(el, dir) {
   let targetCoords = centerFromRect(elBox);
   targetCoords = updateNavigationState(targetCoords, dir);
   let closest = getNearestEl(getNavigableElements, targetCoords, dir);
-  if (closest) closest.focus();
+  if (closest && closest instanceof Element) closest.focus();
+}
+{
+  let endDragFile = function() {
+    if (appState.draggingFile) {
+      appState.draggingFile = false;
+      redraw();
+    }
+  };
+  let container = document;
+  container.addEventListener("focusin", (event) => {
+    if (event.target instanceof Element) lastRect = event.target.getBoundingClientRect();
+  });
+  container.addEventListener("focusout", () => {
+    setTimeout(() => {
+      if (!container.contains(document.activeElement) || document.activeElement === document.body) {
+        resetNavState();
+        if (lastRect) {
+          let targetCoords = centerFromRect(lastRect);
+          targetCoords = updateNavigationState(targetCoords, 4 /* None */);
+          let closest = getNearestEl(getNavigableElements, targetCoords, 4 /* None */);
+          if (closest && closest instanceof Element) closest.focus();
+        }
+      }
+    }, 0);
+  });
+  container.addEventListener("keydown", (e) => {
+    if (e.key === "Tab") {
+      resetNavState();
+    }
+  });
+  container.addEventListener("mousedown", (e) => {
+    resetNavState();
+  });
+  window.addEventListener("dragstart", (e) => {
+    e.preventDefault();
+  });
+  window.addEventListener("dragenter", (e) => {
+    e.preventDefault();
+  });
+  window.addEventListener("dragover", (e) => {
+    e.preventDefault();
+    if (isFileDrag(e) && !appState.draggingFile) {
+      appState.draggingFile = true;
+      redraw();
+    }
+  });
+  window.addEventListener("drop", (e) => {
+    e.preventDefault();
+    endDragFile();
+  });
+  window.addEventListener("dragend", (e) => {
+    e.preventDefault();
+    endDragFile();
+  });
+  window.addEventListener("dragleave", (e) => {
+    if (e.clientX <= 0 || e.clientY <= 0 || e.clientX >= window.innerWidth || e.clientY >= window.innerHeight) {
+      e.preventDefault();
+      endDragFile();
+    }
+  });
 }
 var SPACE = " ";
 var ENTER = "Enter";
@@ -1385,6 +1373,19 @@ function formatTime(time, opts = {}) {
 }
 function formatTimestamp(timestamp, opts = {}) {
   return formatTime(partitionTime(timestamp), opts);
+}
+function isFileDrag(e) {
+  var _a, _b;
+  if ((_a = e.dataTransfer) == null ? void 0 : _a.items) {
+    for (let i = 0; i < e.dataTransfer.items.length; i++) {
+      if (e.dataTransfer.items[i].kind === "file") return true;
+    }
+  } else {
+    if ((((_b = e.dataTransfer) == null ? void 0 : _b.files.length) || 0) > 0) {
+      return true;
+    }
+  }
+  return false;
 }
 function onCreateTask(status, description) {
   if (!description) return;
@@ -1498,6 +1499,7 @@ ${daysAgoLabel} - ${createdAt}
       ondrop: async (e) => {
         e.preventDefault();
         try {
+          if (isFileDrag(e)) return;
           console.log("drop?", e.dataTransfer.getData("text/plain"), e);
           const taskId = parseInt(e.dataTransfer.getData("text/plain"));
           const taskDiv = document.getElementById(domId);

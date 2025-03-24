@@ -15,12 +15,13 @@ npm run build
 - [x] cursor navigation
 - [x] edit session time
 - [x] edit break time
+- [x] prevent file drop in tasks
 - [ ] update time of active task
   - [ ] view
   - [ ] update state
 - [x] tooltips that show how long a task has been present
 - [ ] collect session stats
 - [ ] view session stats
-- [ ] add drop indicator
+- [x] add drop indicator
 - [ ] setup github pages
 - [x] animate progress bar
