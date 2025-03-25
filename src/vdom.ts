@@ -1,3 +1,6 @@
+// Modified version of:
+// https://github.com/luwes/little-vdom/blob/main/little-vdom.js
+
 // Adapted and fixed bugs from little-vdom.js
 // https://gist.github.com/developit/2038b141b31287faa663f410b6649a87
 // https://gist.github.com/marvinhagemeister/8950b1032d67918d21950b3985259d78

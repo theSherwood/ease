@@ -1,3 +1,5 @@
+// https://github.com/rocicorp/fractional-indexing/blob/main/src/index.js
+
 // License: CC0 (no rights reserved).
 
 // This is based on https://observablehq.com/@dgreensp/implementing-fractional-indexing

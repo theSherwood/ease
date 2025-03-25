@@ -118,11 +118,13 @@ function getActiveTask() {
 }
 
 export async function startSession() {
+  let activeTask = getActiveTask();
+  if (!activeTask) return;
+
   appState.status = APP_ACTIVE;
   appState.sessionId = getSessionId();
   appState.checkpoint = Date.now();
 
-  let activeTask = getActiveTask();
   if (activeTask) {
     activeTask.checkpoint = appState.checkpoint;
     await taskStore.upsert(activeTask);
@@ -271,7 +273,6 @@ function addTaskToList(task: Task, list: TaskList) {
   list.list.push(task);
   list.list.sort((a, b) => (a.fridx > b.fridx ? 1 : -1));
   list.list = list.list;
-  console.log('added task', task, list.list);
 }
 
 function removeTaskFromList(taskId: number, list: TaskList) {

@@ -609,7 +609,6 @@ const audioDropHandlers = {
 };
 
 function basicKeydownNavigationHandler(e: KeyboardEvent) {
-  console.log('key', e.key);
   if (e.key === ARROW_UP) navigateEl(e.target as Element, Direction.Up);
   if (e.key === ARROW_DOWN) navigateEl(e.target as Element, Direction.Down);
   if (e.key === ARROW_LEFT) navigateEl(e.target as Element, Direction.Left);
@@ -651,7 +650,6 @@ function sectionHeaderView({ title, collapsed, oncollapse, onexpand }) {
           }
         },
         onkeydown: (e) => {
-          console.log('key', e.key);
           if (e.key === ARROW_LEFT) oncollapse();
           if (e.key === ARROW_RIGHT) onexpand();
           if (e.key === ARROW_UP) navigateEl(e.target, Direction.Up);
@@ -732,7 +730,6 @@ ${daysAgoLabel} - ${createdAt}
         e.preventDefault();
         try {
           if (isFileDrag(e)) return;
-          console.log('drop?', e.dataTransfer.getData('text/plain'), e);
           const taskId = parseInt(e.dataTransfer.getData('text/plain'));
           const taskDiv = document.getElementById(domId) as HTMLElement;
           const rect = taskDiv.getBoundingClientRect();
@@ -740,19 +737,16 @@ ${daysAgoLabel} - ${createdAt}
           let { idx, list } = idxFromTask(task.id, task.status);
           let newFridx = '';
           if (y > rect.height / 2) {
-            console.log('drop bottom');
             // drop below
             let otherTask = list[idx + 1];
             let nextTaskFridx = otherTask?.fridx || null;
             newFridx = generateKeyBetween(task.fridx, nextTaskFridx);
           } else {
-            console.log('drop top');
             // drop above
             let prevTask = list[idx - 1];
             let prevTaskFridx = prevTask?.fridx || null;
             newFridx = generateKeyBetween(prevTaskFridx, task.fridx);
           }
-          console.log('new fridx', newFridx, taskId);
           let droppedTask = await taskFromId(taskId);
           await updateTask(droppedTask!, { fridx: newFridx, status: task.status });
         } catch (e) {
@@ -766,7 +760,6 @@ ${daysAgoLabel} - ${createdAt}
         update({ dragState: DragState.None });
       },
       ondragstart: (e) => {
-        console.log('drag start');
         e.dataTransfer.setData('text/plain', task.id.toString());
         e.dataTransfer.effectAllowed = 'move';
       },
@@ -779,7 +772,6 @@ ${daysAgoLabel} - ${createdAt}
         updateTask(task, { description: e.target.value });
       },
       onkeydown: (e) => {
-        console.log('key', e.key);
         if (e.key === ARROW_UP) navigateEl(e.target, Direction.Up);
         if (e.key === ARROW_DOWN) navigateEl(e.target, Direction.Down);
         if (e.key === ARROW_RIGHT && e.target.selectionStart === e.target.value.length) {
@@ -1082,7 +1074,6 @@ const audioView = (props: AppState) => {
         multiple: true,
         accept: 'audio/*',
         onchange: (e) => {
-          console.log('change', e);
           uploadAudioFiles((files) => handleAudioUpload(files))(e);
         },
         ...audioDropHandlers,
@@ -1108,11 +1099,9 @@ const audioView = (props: AppState) => {
 };
 
 function appView(props: AppState) {
-  console.log('ui', appState.tabs);
   if (props.status === APP_IDLE || props.sessionTasks.list.length === 0) {
     return div(
       { className: 'tasks-bar' },
-      // props.tabs.map((tab) => p({}, tab)),
       h(sessionButtonView, {
         onclick: () => {
           playShuffledAudio();
@@ -1128,7 +1117,6 @@ function appView(props: AppState) {
   } else {
     return div(
       { className: 'tasks-bar' },
-      // div({}, isLeader() ? 'Leader' : 'Follower'),
       // pomodoro timer
       h(pomodoroTimerView, props),
       // buttons
