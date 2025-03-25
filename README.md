@@ -6,6 +6,10 @@ I used https://thesukha.co, which used to be called Centered, for managing my ti
 
 Keep a directory of music that you like and want to listen to while you work. Upload the directory and you're ready to go. Starting a session will shuffle and play your music. I didn't need or want any more fiddling around than that.
 
+## Keyboard Navigation
+
+You can, for the most part, navigate around inputs and buttons on the page using the arrow keys.
+
 ## Dev
 
 ```
