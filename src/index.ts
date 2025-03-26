@@ -23,6 +23,7 @@ import {
   resumeSession,
   setPomodoroDuration,
   setBreakDuration,
+  getActiveTask,
 } from './events';
 import { render, diff, h, dom, DNode } from './vdom';
 import {
@@ -410,9 +411,6 @@ function navigateEl(el: Element, dir: Direction) {
   container.addEventListener('mousedown', (e) => {
     resetNavState();
   });
-  window.addEventListener('dragstart', (e) => {
-    e.preventDefault();
-  });
   window.addEventListener('dragenter', (e) => {
     e.preventDefault();
   });
@@ -664,7 +662,7 @@ function sectionHeaderView({ title, collapsed, oncollapse, onexpand }) {
 
 function taskView(
   { task, active = false }: { task: Task; active: boolean },
-  { renderSignal = 0, dragState = DragState.None, activeTaskId = -1 },
+  { renderSignal = 0, dragState = DragState.None },
   update,
 ) {
   function updateTimeEstimate(e) {
@@ -699,7 +697,7 @@ function taskView(
     timeElapsedLabel += ' / ';
     setTimeout(() => {
       if (appState.status !== APP_ACTIVE) return;
-      if (activeTaskId !== task.id && activeTaskId !== -1) return;
+      if (task.id !== getActiveTask()?.id) return;
       update({ renderSignal: renderSignal + 1 });
     }, 400);
   }
@@ -782,24 +780,28 @@ ${daysAgoLabel} - ${createdAt}
     div(
       {},
       ...(active ? [span({}, timeElapsedLabel)] : []),
-      input({
-        class: 'time-input',
-        value: formatTimestamp(task.timeRemaining),
-        onblur: (e) => {
-          updateTimeEstimate(e);
-        },
-        onkeydown: (e) => {
-          if (e.key === ENTER) updateTimeEstimate(e);
-          if (e.key === ARROW_UP) navigateEl(e.target, Direction.Up);
-          if (e.key === ARROW_DOWN) navigateEl(e.target, Direction.Down);
-          if (e.key === ARROW_LEFT && e.target.selectionStart === 0) {
-            navigateEl(e.target, Direction.Left);
-          }
-          if (e.key === ARROW_RIGHT && e.target.selectionStart === e.target.value.length) {
-            navigateEl(e.target, Direction.Right);
-          }
-        },
-      }),
+      ...(task.status === TASK_COMPLETED
+        ? []
+        : [
+            input({
+              class: 'time-input',
+              value: formatTimestamp(task.timeRemaining),
+              onblur: (e) => {
+                updateTimeEstimate(e);
+              },
+              onkeydown: (e) => {
+                if (e.key === ENTER) updateTimeEstimate(e);
+                if (e.key === ARROW_UP) navigateEl(e.target, Direction.Up);
+                if (e.key === ARROW_DOWN) navigateEl(e.target, Direction.Down);
+                if (e.key === ARROW_LEFT && e.target.selectionStart === 0) {
+                  navigateEl(e.target, Direction.Left);
+                }
+                if (e.key === ARROW_RIGHT && e.target.selectionStart === e.target.value.length) {
+                  navigateEl(e.target, Direction.Right);
+                }
+              },
+            }),
+          ]),
     ),
     div(
       {},
@@ -833,19 +835,20 @@ ${daysAgoLabel} - ${createdAt}
           },
           '+',
         ),
-      button(
-        {
-          class: 'delete-button navigable',
-          onkeydown: (e) => {
-            if (e.key === SPACE || e.key === ENTER) {
-              e.preventDefault();
-              deleteTask(task);
-            } else basicKeydownNavigationHandler(e);
+      !active &&
+        button(
+          {
+            class: 'delete-button navigable',
+            onkeydown: (e) => {
+              if (e.key === SPACE || e.key === ENTER) {
+                e.preventDefault();
+                deleteTask(task);
+              } else basicKeydownNavigationHandler(e);
+            },
+            onclick: () => deleteTask(task),
           },
-          onclick: () => deleteTask(task),
-        },
-        '✕',
-      ),
+          '✕',
+        ),
     ),
   );
 }

@@ -1,13 +1,8 @@
 export const TASK_SESSION = 0;
-export const TASK_ACTIVE = 1;
-export const TASK_RECURRING = 2;
-export const TASK_COMPLETED = 3;
+export const TASK_RECURRING = 1;
+export const TASK_COMPLETED = 2;
 
-export type TaskStatus =
-  | typeof TASK_SESSION
-  | typeof TASK_ACTIVE
-  | typeof TASK_RECURRING
-  | typeof TASK_COMPLETED;
+export type TaskStatus = typeof TASK_SESSION | typeof TASK_RECURRING | typeof TASK_COMPLETED;
 
 export type Task = {
   id: number;

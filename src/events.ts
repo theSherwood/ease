@@ -113,8 +113,28 @@ export async function setBreakDuration(duration: number) {
   await broadcastSessionChange();
 }
 
-function getActiveTask() {
+export function getActiveTask() {
   return sessionTasks.list[0];
+}
+
+async function beginTimingTask(task: Task, time: number) {
+  task.checkpoint = time;
+  task.timeElapsed = task.timeElapsed || 0;
+  await taskStore.upsert(task);
+}
+
+async function pauseTimingTask(task: Task, time: number) {
+  task.timeElapsed = (task.timeElapsed || 0) + time - (task.checkpoint || 0);
+  task.checkpoint = 0;
+  await taskStore.upsert(task);
+}
+
+async function stopTimingTask(task: Task, time: number) {
+  let elapsed = (task.timeElapsed || 0) + time - (task.checkpoint || 0);
+  task.timeRemaining = Math.floor(Math.max(0, task.timeRemaining * 1000 - elapsed) / 1000);
+  task.timeElapsed = 0;
+  task.checkpoint = 0;
+  await taskStore.upsert(task);
 }
 
 export async function startSession() {
@@ -126,8 +146,7 @@ export async function startSession() {
   appState.checkpoint = Date.now();
 
   if (activeTask) {
-    activeTask.checkpoint = appState.checkpoint;
-    await taskStore.upsert(activeTask);
+    await beginTimingTask(activeTask, appState.checkpoint);
   }
 
   await broadcastSessionChange();
@@ -142,9 +161,7 @@ export async function breakSession() {
 
   let activeTask = getActiveTask();
   if (activeTask) {
-    activeTask.timeElapsed = (activeTask.timeElapsed || 0) + now - (activeTask.checkpoint || 0);
-    activeTask.checkpoint = 0;
-    await taskStore.upsert(activeTask);
+    await pauseTimingTask(activeTask, now);
   }
 
   await broadcastSessionChange();
@@ -162,8 +179,7 @@ export async function resumeSession() {
 
   let activeTask = getActiveTask();
   if (activeTask) {
-    activeTask.checkpoint = appState.checkpoint;
-    await taskStore.upsert(activeTask);
+    await beginTimingTask(activeTask, appState.checkpoint);
   }
 
   await broadcastSessionChange();
@@ -184,13 +200,7 @@ export async function endSession() {
 
   let activeTask = getActiveTask();
   if (activeTask) {
-    let elapsed = (activeTask.timeElapsed || 0) + now - (activeTask.checkpoint || 0);
-    activeTask.timeRemaining = Math.floor(
-      Math.max(0, activeTask.timeRemaining * 1000 - elapsed) / 1000,
-    );
-    activeTask.timeElapsed = 0;
-    activeTask.checkpoint = 0;
-    await taskStore.upsert(activeTask);
+    await stopTimingTask(activeTask, now);
   }
 
   await broadcastSessionChange();
@@ -300,19 +310,39 @@ export async function createTask(taskConfig: Task) {
 }
 
 export async function deleteTask(task: Task) {
-  appState.leader = appState.tabId;
-  await taskStore.delete(task.id);
-  removeTaskFromLists(task);
-  callback.onChange();
-  postMessage({ type: 'updateTask', id: task.id });
+  await updateTask(task, null);
 }
 
-export async function updateTask(task: Task, update: Partial<Task>) {
+export async function updateTask(task: Task, update: Partial<Task> | null) {
   appState.leader = appState.tabId;
+  let now = Date.now();
+  let activeTask = getActiveTask();
   removeTaskFromLists(task);
-  const updatedTask = { ...task, ...update };
-  await taskStore.upsert(updatedTask);
-  addTaskToLists(updatedTask);
+  let updatedTask = { ...task, ...update };
+
+  let taskDeleted = update === null;
+  let statusChanged =
+    taskDeleted || (update?.status !== undefined && task.status !== updatedTask.status);
+
+  if (taskDeleted) {
+    await taskStore.delete(task.id);
+  } else {
+    await taskStore.upsert(updatedTask);
+    addTaskToLists(updatedTask);
+  }
+
   callback.onChange();
   postMessage({ type: 'updateTask', id: task.id });
+
+  if (activeTask && activeTask.id === task.id && statusChanged) {
+    let nextActiveTask = getActiveTask();
+    if (nextActiveTask) {
+      await stopTimingTask(updatedTask, now);
+      await beginTimingTask(nextActiveTask, now);
+      callback.onChange();
+      postMessage({ type: 'updateTask', id: nextActiveTask.id });
+    } else {
+      await endSession();
+    }
+  }
 }

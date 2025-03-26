@@ -367,8 +367,8 @@ async function setupStore() {
 
 // src/types.ts
 var TASK_SESSION = 0;
-var TASK_RECURRING = 2;
-var TASK_COMPLETED = 3;
+var TASK_RECURRING = 1;
+var TASK_COMPLETED = 2;
 var AUDIO_FINISHED = 0;
 var AUDIO_ABORTED = 1;
 var APP_IDLE = 0;
@@ -615,7 +615,6 @@ var sessionTasks = { list: [] };
 var recurringTasks = { list: [] };
 var completedTasks = { list: [] };
 var tabId = Math.random().toString(36);
-console.log("tabId", tabId);
 var appState = {
   // Tab coordination
   tabId,
@@ -746,14 +745,31 @@ async function setBreakDuration(duration) {
 function getActiveTask() {
   return sessionTasks.list[0];
 }
+async function beginTimingTask(task, time) {
+  task.checkpoint = time;
+  task.timeElapsed = task.timeElapsed || 0;
+  await taskStore.upsert(task);
+}
+async function pauseTimingTask(task, time) {
+  task.timeElapsed = (task.timeElapsed || 0) + time - (task.checkpoint || 0);
+  task.checkpoint = 0;
+  await taskStore.upsert(task);
+}
+async function stopTimingTask(task, time) {
+  let elapsed = (task.timeElapsed || 0) + time - (task.checkpoint || 0);
+  task.timeRemaining = Math.floor(Math.max(0, task.timeRemaining * 1e3 - elapsed) / 1e3);
+  task.timeElapsed = 0;
+  task.checkpoint = 0;
+  await taskStore.upsert(task);
+}
 async function startSession() {
+  let activeTask = getActiveTask();
+  if (!activeTask) return;
   appState.status = APP_ACTIVE;
   appState.sessionId = getSessionId();
   appState.checkpoint = Date.now();
-  let activeTask = getActiveTask();
   if (activeTask) {
-    activeTask.checkpoint = appState.checkpoint;
-    await taskStore.upsert(activeTask);
+    await beginTimingTask(activeTask, appState.checkpoint);
   }
   await broadcastSessionChange();
 }
@@ -765,9 +781,7 @@ async function breakSession() {
   appState.checkpoint = now;
   let activeTask = getActiveTask();
   if (activeTask) {
-    activeTask.timeElapsed = (activeTask.timeElapsed || 0) + now - (activeTask.checkpoint || 0);
-    activeTask.checkpoint = 0;
-    await taskStore.upsert(activeTask);
+    await pauseTimingTask(activeTask, now);
   }
   await broadcastSessionChange();
   await sessionSegmentStore.add({
@@ -783,8 +797,7 @@ async function resumeSession() {
   appState.checkpoint = Date.now();
   let activeTask = getActiveTask();
   if (activeTask) {
-    activeTask.checkpoint = appState.checkpoint;
-    await taskStore.upsert(activeTask);
+    await beginTimingTask(activeTask, appState.checkpoint);
   }
   await broadcastSessionChange();
   await sessionSegmentStore.add({
@@ -803,13 +816,7 @@ async function endSession() {
   appState.checkpoint = 0;
   let activeTask = getActiveTask();
   if (activeTask) {
-    let elapsed = (activeTask.timeElapsed || 0) + now - (activeTask.checkpoint || 0);
-    activeTask.timeRemaining = Math.floor(
-      Math.max(0, activeTask.timeRemaining * 1e3 - elapsed) / 1e3
-    );
-    activeTask.timeElapsed = 0;
-    activeTask.checkpoint = 0;
-    await taskStore.upsert(activeTask);
+    await stopTimingTask(activeTask, now);
   }
   await broadcastSessionChange();
   await sessionSegmentStore.add({
@@ -878,7 +885,6 @@ function addTaskToList(task, list) {
   list.list.push(task);
   list.list.sort((a, b) => a.fridx > b.fridx ? 1 : -1);
   list.list = list.list;
-  console.log("added task", task, list.list);
 }
 function removeTaskFromList(taskId, list) {
   let found = false;
@@ -902,20 +908,35 @@ async function createTask(taskConfig) {
   postMessage({ type: "updateTask", id: task.id });
 }
 async function deleteTask(task) {
-  appState.leader = appState.tabId;
-  await taskStore.delete(task.id);
-  removeTaskFromLists(task);
-  callback.onChange();
-  postMessage({ type: "updateTask", id: task.id });
+  await updateTask(task, null);
 }
 async function updateTask(task, update) {
   appState.leader = appState.tabId;
+  let now = Date.now();
+  let activeTask = getActiveTask();
   removeTaskFromLists(task);
-  const updatedTask = { ...task, ...update };
-  await taskStore.upsert(updatedTask);
-  addTaskToLists(updatedTask);
+  let updatedTask = { ...task, ...update };
+  let taskDeleted = update === null;
+  let statusChanged = taskDeleted || (update == null ? void 0 : update.status) !== void 0 && task.status !== updatedTask.status;
+  if (taskDeleted) {
+    await taskStore.delete(task.id);
+  } else {
+    await taskStore.upsert(updatedTask);
+    addTaskToLists(updatedTask);
+  }
   callback.onChange();
   postMessage({ type: "updateTask", id: task.id });
+  if (activeTask && activeTask.id === task.id && statusChanged) {
+    let nextActiveTask = getActiveTask();
+    if (nextActiveTask) {
+      await stopTimingTask(updatedTask, now);
+      await beginTimingTask(nextActiveTask, now);
+      callback.onChange();
+      postMessage({ type: "updateTask", id: nextActiveTask.id });
+    } else {
+      await endSession();
+    }
+  }
 }
 
 // src/vdom.ts
@@ -1310,9 +1331,6 @@ function navigateEl(el, dir) {
   container.addEventListener("mousedown", (e) => {
     resetNavState();
   });
-  window.addEventListener("dragstart", (e) => {
-    e.preventDefault();
-  });
   window.addEventListener("dragenter", (e) => {
     e.preventDefault();
   });
@@ -1454,7 +1472,6 @@ var audioDropHandlers = {
   }
 };
 function basicKeydownNavigationHandler(e) {
-  console.log("key", e.key);
   if (e.key === ARROW_UP) navigateEl(e.target, 0 /* Up */);
   if (e.key === ARROW_DOWN) navigateEl(e.target, 1 /* Down */);
   if (e.key === ARROW_LEFT) navigateEl(e.target, 2 /* Left */);
@@ -1491,7 +1508,6 @@ function sectionHeaderView({ title, collapsed, oncollapse, onexpand }) {
           }
         },
         onkeydown: (e) => {
-          console.log("key", e.key);
           if (e.key === ARROW_LEFT) oncollapse();
           if (e.key === ARROW_RIGHT) onexpand();
           if (e.key === ARROW_UP) navigateEl(e.target, 0 /* Up */);
@@ -1503,7 +1519,7 @@ function sectionHeaderView({ title, collapsed, oncollapse, onexpand }) {
     )
   );
 }
-function taskView({ task, active = false }, { renderSignal = 0, dragState = 0 /* None */, activeTaskId = -1 }, update) {
+function taskView({ task, active = false }, { renderSignal = 0, dragState = 0 /* None */ }, update) {
   function updateTimeEstimate(e) {
     let time = parseHumanReadableTime(e.target.value);
     updateTask(task, { timeEstimate: time, timeRemaining: time });
@@ -1530,8 +1546,9 @@ function taskView({ task, active = false }, { renderSignal = 0, dragState = 0 /*
     });
     timeElapsedLabel += " / ";
     setTimeout(() => {
+      var _a;
       if (appState.status !== APP_ACTIVE) return;
-      if (activeTaskId !== task.id && activeTaskId !== -1) return;
+      if (task.id !== ((_a = getActiveTask()) == null ? void 0 : _a.id)) return;
       update({ renderSignal: renderSignal + 1 });
     }, 400);
   }
@@ -1560,7 +1577,6 @@ ${daysAgoLabel} - ${createdAt}
         e.preventDefault();
         try {
           if (isFileDrag(e)) return;
-          console.log("drop?", e.dataTransfer.getData("text/plain"), e);
           const taskId = parseInt(e.dataTransfer.getData("text/plain"));
           const taskDiv = document.getElementById(domId);
           const rect = taskDiv.getBoundingClientRect();
@@ -1568,17 +1584,14 @@ ${daysAgoLabel} - ${createdAt}
           let { idx, list } = idxFromTask(task.id, task.status);
           let newFridx = "";
           if (y > rect.height / 2) {
-            console.log("drop bottom");
             let otherTask = list[idx + 1];
             let nextTaskFridx = (otherTask == null ? void 0 : otherTask.fridx) || null;
             newFridx = generateKeyBetween(task.fridx, nextTaskFridx);
           } else {
-            console.log("drop top");
             let prevTask = list[idx - 1];
             let prevTaskFridx = (prevTask == null ? void 0 : prevTask.fridx) || null;
             newFridx = generateKeyBetween(prevTaskFridx, task.fridx);
           }
-          console.log("new fridx", newFridx, taskId);
           let droppedTask = await taskFromId(taskId);
           await updateTask(droppedTask, { fridx: newFridx, status: task.status });
         } catch (e2) {
@@ -1592,7 +1605,6 @@ ${daysAgoLabel} - ${createdAt}
         update({ dragState: 0 /* None */ });
       },
       ondragstart: (e) => {
-        console.log("drag start");
         e.dataTransfer.setData("text/plain", task.id.toString());
         e.dataTransfer.effectAllowed = "move";
       }
@@ -1605,7 +1617,6 @@ ${daysAgoLabel} - ${createdAt}
         updateTask(task, { description: e.target.value });
       },
       onkeydown: (e) => {
-        console.log("key", e.key);
         if (e.key === ARROW_UP) navigateEl(e.target, 0 /* Up */);
         if (e.key === ARROW_DOWN) navigateEl(e.target, 1 /* Down */);
         if (e.key === ARROW_RIGHT && e.target.selectionStart === e.target.value.length) {
@@ -1616,24 +1627,26 @@ ${daysAgoLabel} - ${createdAt}
     div(
       {},
       ...active ? [span({}, timeElapsedLabel)] : [],
-      input({
-        class: "time-input",
-        value: formatTimestamp(task.timeRemaining),
-        onblur: (e) => {
-          updateTimeEstimate(e);
-        },
-        onkeydown: (e) => {
-          if (e.key === ENTER) updateTimeEstimate(e);
-          if (e.key === ARROW_UP) navigateEl(e.target, 0 /* Up */);
-          if (e.key === ARROW_DOWN) navigateEl(e.target, 1 /* Down */);
-          if (e.key === ARROW_LEFT && e.target.selectionStart === 0) {
-            navigateEl(e.target, 2 /* Left */);
+      ...task.status === TASK_COMPLETED ? [] : [
+        input({
+          class: "time-input",
+          value: formatTimestamp(task.timeRemaining),
+          onblur: (e) => {
+            updateTimeEstimate(e);
+          },
+          onkeydown: (e) => {
+            if (e.key === ENTER) updateTimeEstimate(e);
+            if (e.key === ARROW_UP) navigateEl(e.target, 0 /* Up */);
+            if (e.key === ARROW_DOWN) navigateEl(e.target, 1 /* Down */);
+            if (e.key === ARROW_LEFT && e.target.selectionStart === 0) {
+              navigateEl(e.target, 2 /* Left */);
+            }
+            if (e.key === ARROW_RIGHT && e.target.selectionStart === e.target.value.length) {
+              navigateEl(e.target, 3 /* Right */);
+            }
           }
-          if (e.key === ARROW_RIGHT && e.target.selectionStart === e.target.value.length) {
-            navigateEl(e.target, 3 /* Right */);
-          }
-        }
-      })
+        })
+      ]
     ),
     div(
       {},
@@ -1665,7 +1678,7 @@ ${daysAgoLabel} - ${createdAt}
         },
         "+"
       ),
-      button(
+      !active && button(
         {
           class: "delete-button navigable",
           onkeydown: (e) => {
@@ -1876,7 +1889,6 @@ var audioView = (props) => {
         multiple: true,
         accept: "audio/*",
         onchange: (e) => {
-          console.log("change", e);
           uploadAudioFiles((files) => handleAudioUpload(files))(e);
         },
         ...audioDropHandlers
@@ -1901,11 +1913,9 @@ var audioView = (props) => {
   }
 };
 function appView(props) {
-  console.log("ui", appState.tabs);
   if (props.status === APP_IDLE || props.sessionTasks.list.length === 0) {
     return div(
       { className: "tasks-bar" },
-      // props.tabs.map((tab) => p({}, tab)),
       h(sessionButtonView, {
         onclick: () => {
           playShuffledAudio();
@@ -1921,7 +1931,6 @@ function appView(props) {
   } else {
     return div(
       { className: "tasks-bar" },
-      // div({}, isLeader() ? 'Leader' : 'Follower'),
       // pomodoro timer
       h(pomodoroTimerView, props),
       // buttons
